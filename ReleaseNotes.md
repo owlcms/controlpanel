@@ -9,6 +9,9 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
+- 3.6.0: Support for cameras and tracker on macOS
+- 3.6.0: (internal) Code lint, macOS assumed to be dev platform.
+
 - 3.5.0: Improve detection of already running stale instance of OWLCMS that can hold the database and prevent upgrade
 - 3.5.0: (macOS) Notarization of macOS .dmg files to allow direct DMG install
 - 3.5.0: (macOS) support brew for install and updates

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Default release tag (can be overridden by first CLI argument)
-TAG="3.5.0"
+TAG="3.6.0-rc01"
 # =============================================================================
 # Release script for owlcms-controlpanel
 # Uses workflow_dispatch trigger with tag input parameter
