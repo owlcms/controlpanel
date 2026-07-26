@@ -26,6 +26,19 @@ import (
 type Release struct {
 	TagName string `json:"tag_name"`
 	Name    string `json:"name"`
+	Assets  []struct {
+		Name string `json:"name"`
+	} `json:"assets"`
+}
+
+// hasAsset reports whether the release publishes the named asset.
+func (r Release) hasAsset(name string) bool {
+	for _, a := range r.Assets {
+		if a.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 var (
@@ -63,9 +76,19 @@ func fetchReleases() ([]string, error) {
 		return nil, fmt.Errorf("no releases found")
 	}
 
+	// Only keep releases that ship a binary for the current platform: macOS
+	// support was added in 2.5.0, older releases have no darwin assets.
+	exeName := camerasExeName()
 	releaseNames := make([]string, 0, len(releases))
 	for _, r := range releases {
+		if !r.hasAsset(exeName) {
+			continue
+		}
 		releaseNames = append(releaseNames, r.TagName)
+	}
+
+	if len(releaseNames) == 0 {
+		return nil, fmt.Errorf("no release provides %s", exeName)
 	}
 
 	sort.Slice(releaseNames, func(i, j int) bool {
@@ -347,6 +370,10 @@ func checkForNewerVersion() {
 
 		var versionType string
 		if containsPreReleaseTag(release) {
+			// Only offer a prerelease to users who already run a prerelease.
+			if !containsPreReleaseTag(latestInstalled) {
+				continue
+			}
 			versionType = "prerelease"
 		} else {
 			versionType = "stable"
