@@ -22,8 +22,7 @@ import (
 )
 
 var (
-	versionList     *widget.List
-	latestInstalled string
+	versionList *widget.List
 )
 
 func getAllInstalledVersions() []string {
@@ -197,21 +196,6 @@ func NewGreenButton(label string, tapped func()) *widget.Button {
 	return btn
 }
 
-func createCamerasLaunchButton(w fyne.Window, version string, buttonContainer *fyne.Container) {
-	launchButton := NewGreenButton("Cameras", nil)
-	launchButton.OnTapped = func() {
-		if camerasProcess != nil {
-			dialog.ShowError(fmt.Errorf("cameras is already running"), w)
-			return
-		}
-		log.Printf("Launching cameras %s", version)
-		if err := launchCameras(version, launchButton, w); err != nil {
-			dialog.ShowError(err, w)
-		}
-	}
-	buttonContainer.Add(container.NewPadded(launchButton))
-}
-
 func createReplaysLaunchButton(w fyne.Window, version string, buttonContainer *fyne.Container) {
 	launchButton := NewGreenButton("Replays", nil)
 	launchButton.OnTapped = func() {
@@ -220,9 +204,20 @@ func createReplaysLaunchButton(w fyne.Window, version string, buttonContainer *f
 			return
 		}
 		log.Printf("Launching replays %s", version)
-		if err := launchReplays(version, launchButton, w); err != nil {
-			dialog.ShowError(err, w)
-		}
+		go func() {
+			// Blocking download, must stay off the Fyne main goroutine.
+			if _, err := shared.EnsureFFmpegPrerequisite(w); err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(fmt.Errorf("FFmpeg prerequisite: %w", err), w)
+				})
+				return
+			}
+			fyne.Do(func() {
+				if err := launchReplays(version, launchButton, w); err != nil {
+					dialog.ShowError(err, w)
+				}
+			})
+		}()
 	}
 	buttonContainer.Add(container.NewPadded(launchButton))
 }
@@ -266,7 +261,7 @@ func createUpdateButton(version string, w fyne.Window, buttonContainer *fyne.Con
 	if shared.CompareVersions(mostRecent, version) {
 		updateButton.SetText(fmt.Sprintf("Update to %s", mostRecent))
 		updateButton.OnTapped = func() {
-			updateVersion(version, mostRecent, w)
+			go updateVersion(version, mostRecent, w)
 		}
 		updateButton.Refresh()
 		buttonContainer.Add(container.NewPadded(updateButton))
@@ -324,18 +319,6 @@ func createRemoveButton(version string, w fyne.Window, buttonContainer *fyne.Con
 			}, w)
 	}
 	buttonContainer.Add(container.NewPadded(removeButton))
-}
-
-func adjustUpdateButton(mostRecent, version string, updateButton *widget.Button, buttonContainer *fyne.Container, w fyne.Window) {
-	if shared.CompareVersions(mostRecent, version) {
-		updateButton.SetText(fmt.Sprintf("Update to %s", mostRecent))
-		updateButton.OnTapped = func() {
-			updateVersion(version, mostRecent, w)
-		}
-		updateButton.Refresh()
-	} else {
-		buttonContainer.Refresh()
-	}
 }
 
 func filterVersions(versions []string, current string) []string {
@@ -432,13 +415,6 @@ func computeVersionScrollHeight(numVersions int) float32 {
 	minHeight := 140
 	rowHeight := 50
 	return float32(minHeight + (rowHeight * min(numVersions, 4)))
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func uninstallAll() {

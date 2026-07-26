@@ -159,6 +159,9 @@ func DownloadAndInstallFFmpeg(progressCallback func(downloaded, total int64), ca
 // EnsureFFmpegPrerequisite checks for FFmpeg in the shared directory,
 // downloads it if missing, and falls back to the system PATH only when
 // the download is not possible (e.g. unsupported platform).
+//
+// This blocks on a network download and drives a progress dialog, so it must
+// be called from a background goroutine, never from the Fyne main goroutine.
 func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
 	log.Println("FFmpeg check: looking for bundled FFmpeg in shared directory")
 	ffmpegDir := GetSharedFFmpegDir()
@@ -187,25 +190,34 @@ func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
 	log.Printf("FFmpeg check: will download bundled FFmpeg from %s", downloadURL)
 
 	cancel := make(chan bool)
-	progressBar := widget.NewProgressBar()
-	progressDialog := dialog.NewCustom("Installing FFmpeg", "Cancel", progressBar, w)
-	progressDialog.SetOnClosed(func() {
-		select {
-		case cancel <- true:
-		default:
-		}
+	var progressBar *widget.ProgressBar
+	var progressDialog dialog.Dialog
+	fyne.DoAndWait(func() {
+		progressBar = widget.NewProgressBar()
+		progressDialog = dialog.NewCustom("Installing FFmpeg", "Cancel", progressBar, w)
+		progressDialog.SetOnClosed(func() {
+			select {
+			case cancel <- true:
+			default:
+			}
+		})
+		progressDialog.Show()
+		progressBar.SetValue(0.01)
 	})
-	progressDialog.Show()
-	progressBar.SetValue(0.01)
 
 	path, err := DownloadAndInstallFFmpeg(func(downloaded, total int64) {
 		if total > 0 {
-			progressBar.SetValue(float64(downloaded) / float64(total))
+			progress := float64(downloaded) / float64(total)
+			fyne.Do(func() {
+				progressBar.SetValue(progress)
+			})
 		}
 	}, cancel)
 
-	progressBar.SetValue(1.0)
-	progressDialog.Hide()
+	fyne.DoAndWait(func() {
+		progressBar.SetValue(1.0)
+		progressDialog.Hide()
+	})
 
 	if err != nil {
 		// Download failed — try system PATH as last resort.

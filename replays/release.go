@@ -185,15 +185,21 @@ func confirmAndDownloadVersion(version string, w fyne.Window) {
 
 func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Window) {
 	cancel := make(chan bool)
-	progressDialog, progressBar := customdialog.NewDownloadDialog("Installing Replays Module", w, cancel)
-	progressDialog.Show()
+	var progressDialog dialog.Dialog
+	var progressBar *widget.ProgressBar
+	fyne.DoAndWait(func() {
+		progressDialog, progressBar = customdialog.NewDownloadDialog("Installing Replays Module", w, cancel)
+		progressDialog.Show()
+	})
 
 	repsFile := replaysExeName()
 
 	versionDir := filepath.Join(installDir, installVersion)
 	if err := shared.EnsureDir0755(versionDir); err != nil {
-		progressDialog.Hide()
-		dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		fyne.Do(func() {
+			progressDialog.Hide()
+			dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		})
 		return
 	}
 
@@ -201,18 +207,25 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 	repsURL := fmt.Sprintf("%s/%s/%s", downloadURLPrefix, downloadVersion, repsFile)
 	repsPath := filepath.Join(versionDir, repsFile)
 	log.Printf("Downloading replays from: %s", repsURL)
-	progressBar.SetValue(0.1)
+	fyne.Do(func() {
+		progressBar.SetValue(0.1)
+	})
 
 	if err := shared.DownloadArchive(repsURL, repsPath, func(d, t int64) {
 		if t > 0 {
-			progressBar.SetValue(0.1 + 0.9*float64(d)/float64(t))
+			progress := 0.1 + 0.9*float64(d)/float64(t)
+			fyne.Do(func() {
+				progressBar.SetValue(progress)
+			})
 		}
 	}, cancel); err != nil {
-		progressDialog.Hide()
-		if err.Error() == "download cancelled" {
-			return
-		}
-		dialog.ShowError(fmt.Errorf("replays download failed: %w", err), w)
+		cancelled := err.Error() == "download cancelled"
+		fyne.Do(func() {
+			progressDialog.Hide()
+			if !cancelled {
+				dialog.ShowError(fmt.Errorf("replays download failed: %w", err), w)
+			}
+		})
 		return
 	}
 
@@ -224,30 +237,38 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 	log.Printf("Extracting replays config files using %s --configDir %s --extractConfig", repsPath, versionDir)
 	if err := runExtractConfig(repsPath, versionDir); err != nil {
 		log.Printf("Failed to extract replay config files (binary=%s, configDir=%s): %v", repsPath, versionDir, err)
-		progressDialog.Hide()
-		dialog.ShowError(fmt.Errorf("failed to extract replay config files: %w", err), w)
+		fyne.Do(func() {
+			progressDialog.Hide()
+			dialog.ShowError(fmt.Errorf("failed to extract replay config files: %w", err), w)
+		})
 		return
 	}
 
-	progressBar.SetValue(1.0)
-	progressDialog.Hide()
+	fyne.DoAndWait(func() {
+		progressBar.SetValue(1.0)
+		progressDialog.Hide()
+	})
 
 	// Ensure FFmpeg is available (download if needed)
 	if _, err := shared.EnsureFFmpegPrerequisite(w); err != nil {
 		log.Printf("FFmpeg prerequisite failed during replays install: %v", err)
-		dialog.ShowError(fmt.Errorf("FFmpeg installation failed: %w", err), w)
+		fyne.Do(func() {
+			dialog.ShowError(fmt.Errorf("FFmpeg installation failed: %w", err), w)
+		})
 		return
 	}
 
 	message := fmt.Sprintf(
 		"Successfully installed Replays module version %s\n\nLocation: %s",
 		installVersion, versionDir)
-	dialog.ShowInformation("Installation Complete", message, w)
-	HideDownloadables()
+	fyne.Do(func() {
+		dialog.ShowInformation("Installation Complete", message, w)
+		HideDownloadables()
 
-	setVideoTabMode(w)
-	recomputeVersionList(w)
-	checkForNewerVersion()
+		setVideoTabMode(w)
+		recomputeVersionList(w)
+		checkForNewerVersion()
+	})
 }
 
 func runExtractConfig(binaryPath, configDir string) error {
@@ -401,6 +422,8 @@ func updateExplanation() {
 	singleOrMultiVersionLabel.Refresh()
 }
 
+// updateVersion downloads a newer build over an existing install. It blocks on
+// the network, so it must be called from a background goroutine.
 func updateVersion(existingVersion, targetVersion string, w fyne.Window) {
 	existingDir := filepath.Join(installDir, existingVersion)
 	targetBaseVersion, _ := shared.ParseVersionWithBuild(targetVersion)
@@ -411,14 +434,20 @@ func updateVersion(existingVersion, targetVersion string, w fyne.Window) {
 		targetInstallVersion = fmt.Sprintf("%s+%s", targetBaseVersion, resolvedBuild)
 	}
 	cancel := make(chan bool)
-	progressDialog, progressBar := customdialog.NewDownloadDialog("Updating Replays Module", w, cancel)
-	progressDialog.Show()
+	var progressDialog dialog.Dialog
+	var progressBar *widget.ProgressBar
+	fyne.DoAndWait(func() {
+		progressDialog, progressBar = customdialog.NewDownloadDialog("Updating Replays Module", w, cancel)
+		progressDialog.Show()
+	})
 
 	repsFile := replaysExeName()
 	newVersionDir := filepath.Join(installDir, targetInstallVersion)
 	if err := shared.EnsureDir0755(newVersionDir); err != nil {
-		progressDialog.Hide()
-		dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		fyne.Do(func() {
+			progressDialog.Hide()
+			dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		})
 		return
 	}
 
@@ -426,14 +455,19 @@ func updateVersion(existingVersion, targetVersion string, w fyne.Window) {
 	repsURL := fmt.Sprintf("%s/%s/%s", downloadURLPrefix, targetVersion, repsFile)
 	if err := shared.DownloadArchive(repsURL, repsPath, func(d, t int64) {
 		if t > 0 {
-			progressBar.SetValue(float64(d) / float64(t))
+			progress := float64(d) / float64(t)
+			fyne.Do(func() {
+				progressBar.SetValue(progress)
+			})
 		}
 	}, cancel); err != nil {
-		progressDialog.Hide()
-		if err.Error() == "download cancelled" {
-			return
-		}
-		dialog.ShowError(fmt.Errorf("replays download failed: %w", err), w)
+		cancelled := err.Error() == "download cancelled"
+		fyne.Do(func() {
+			progressDialog.Hide()
+			if !cancelled {
+				dialog.ShowError(fmt.Errorf("replays download failed: %w", err), w)
+			}
+		})
 		return
 	}
 	if shared.GetGoos() != "windows" {
@@ -445,10 +479,12 @@ func updateVersion(existingVersion, targetVersion string, w fyne.Window) {
 		log.Printf("No config to copy from %s: %v", existingDir, err)
 	}
 
-	progressBar.SetValue(1.0)
-	progressDialog.Hide()
-	dialog.ShowInformation("Update Complete", fmt.Sprintf("Successfully updated Replays module to version %s", targetInstallVersion), w)
+	fyne.Do(func() {
+		progressBar.SetValue(1.0)
+		progressDialog.Hide()
+		dialog.ShowInformation("Update Complete", fmt.Sprintf("Successfully updated Replays module to version %s", targetInstallVersion), w)
 
-	recomputeVersionList(w)
-	checkForNewerVersion()
+		recomputeVersionList(w)
+		checkForNewerVersion()
+	})
 }

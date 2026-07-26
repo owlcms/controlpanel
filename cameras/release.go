@@ -185,21 +185,30 @@ func confirmAndDownloadVersion(version string, w fyne.Window) {
 
 func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Window) {
 	cancel := make(chan bool)
-	progressDialog, progressBar := customdialog.NewDownloadDialog("Installing Cameras Module", w, cancel)
-	progressDialog.Show()
+	var progressDialog dialog.Dialog
+	var progressBar *widget.ProgressBar
+	fyne.DoAndWait(func() {
+		progressDialog, progressBar = customdialog.NewDownloadDialog("Installing Cameras Module", w, cancel)
+		progressDialog.Show()
+	})
 
 	camsFile := camerasExeName()
 
 	versionDir := filepath.Join(installDir, installVersion)
 	if err := shared.EnsureDir0755(versionDir); err != nil {
-		progressDialog.Hide()
-		dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		fyne.Do(func() {
+			progressDialog.Hide()
+			dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		})
 		return
 	}
 
 	progressCallback := func(downloaded, total int64) {
 		if total > 0 {
-			progressBar.SetValue(float64(downloaded) / float64(total))
+			progress := float64(downloaded) / float64(total)
+			fyne.Do(func() {
+				progressBar.SetValue(progress)
+			})
 		}
 	}
 
@@ -207,14 +216,18 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 	camsURL := fmt.Sprintf("%s/%s/%s", downloadURLPrefix, downloadVersion, camsFile)
 	camsPath := filepath.Join(versionDir, camsFile)
 	log.Printf("Downloading cameras from: %s", camsURL)
-	progressBar.SetValue(0.01)
+	fyne.Do(func() {
+		progressBar.SetValue(0.01)
+	})
 
 	if err := shared.DownloadArchive(camsURL, camsPath, progressCallback, cancel); err != nil {
-		progressDialog.Hide()
-		if err.Error() == "download cancelled" {
-			return
-		}
-		dialog.ShowError(fmt.Errorf("cameras download failed: %w", err), w)
+		cancelled := err.Error() == "download cancelled"
+		fyne.Do(func() {
+			progressDialog.Hide()
+			if !cancelled {
+				dialog.ShowError(fmt.Errorf("cameras download failed: %w", err), w)
+			}
+		})
 		return
 	}
 
@@ -226,30 +239,38 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 	log.Printf("Extracting camera config files using %s --configDir %s --extractConfig", camsPath, versionDir)
 	if err := runExtractConfig(camsPath, versionDir); err != nil {
 		log.Printf("Failed to extract camera config files (binary=%s, configDir=%s): %v", camsPath, versionDir, err)
-		progressDialog.Hide()
-		dialog.ShowError(fmt.Errorf("failed to extract camera config files: %w", err), w)
+		fyne.Do(func() {
+			progressDialog.Hide()
+			dialog.ShowError(fmt.Errorf("failed to extract camera config files: %w", err), w)
+		})
 		return
 	}
 
-	progressBar.SetValue(1.0)
-	progressDialog.Hide()
+	fyne.DoAndWait(func() {
+		progressBar.SetValue(1.0)
+		progressDialog.Hide()
+	})
 
 	// Ensure FFmpeg is available (download if needed)
 	if _, err := shared.EnsureFFmpegPrerequisite(w); err != nil {
 		log.Printf("FFmpeg prerequisite failed during cameras install: %v", err)
-		dialog.ShowError(fmt.Errorf("FFmpeg installation failed: %w", err), w)
+		fyne.Do(func() {
+			dialog.ShowError(fmt.Errorf("FFmpeg installation failed: %w", err), w)
+		})
 		return
 	}
 
 	message := fmt.Sprintf(
 		"Successfully installed Cameras module version %s\n\nLocation: %s",
 		installVersion, versionDir)
-	dialog.ShowInformation("Installation Complete", message, w)
-	HideDownloadables()
+	fyne.Do(func() {
+		dialog.ShowInformation("Installation Complete", message, w)
+		HideDownloadables()
 
-	setVideoTabMode(w)
-	recomputeVersionList(w)
-	checkForNewerVersion()
+		setVideoTabMode(w)
+		recomputeVersionList(w)
+		checkForNewerVersion()
+	})
 }
 
 func runExtractConfig(binaryPath, configDir string) error {
@@ -403,6 +424,8 @@ func updateExplanation() {
 	singleOrMultiVersionLabel.Refresh()
 }
 
+// updateVersion downloads a newer build over an existing install. It blocks on
+// the network, so it must be called from a background goroutine.
 func updateVersion(existingVersion, targetVersion string, w fyne.Window) {
 	existingDir := filepath.Join(installDir, existingVersion)
 	targetBaseVersion, _ := shared.ParseVersionWithBuild(targetVersion)
@@ -413,31 +436,42 @@ func updateVersion(existingVersion, targetVersion string, w fyne.Window) {
 		targetInstallVersion = fmt.Sprintf("%s+%s", targetBaseVersion, resolvedBuild)
 	}
 	cancel := make(chan bool)
-	progressDialog, progressBar := customdialog.NewDownloadDialog("Updating Cameras Module", w, cancel)
-	progressDialog.Show()
+	var progressDialog dialog.Dialog
+	var progressBar *widget.ProgressBar
+	fyne.DoAndWait(func() {
+		progressDialog, progressBar = customdialog.NewDownloadDialog("Updating Cameras Module", w, cancel)
+		progressDialog.Show()
+	})
 
 	camsFile := camerasExeName()
 	newVersionDir := filepath.Join(installDir, targetInstallVersion)
 	if err := shared.EnsureDir0755(newVersionDir); err != nil {
-		progressDialog.Hide()
-		dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		fyne.Do(func() {
+			progressDialog.Hide()
+			dialog.ShowError(fmt.Errorf("creating version directory: %w", err), w)
+		})
 		return
 	}
 
 	progressCallback := func(downloaded, total int64) {
 		if total > 0 {
-			progressBar.SetValue(float64(downloaded) / float64(total))
+			progress := float64(downloaded) / float64(total)
+			fyne.Do(func() {
+				progressBar.SetValue(progress)
+			})
 		}
 	}
 
 	camsPath := filepath.Join(newVersionDir, camsFile)
 	camsURL := fmt.Sprintf("%s/%s/%s", downloadURLPrefix, targetVersion, camsFile)
 	if err := shared.DownloadArchive(camsURL, camsPath, progressCallback, cancel); err != nil {
-		progressDialog.Hide()
-		if err.Error() == "download cancelled" {
-			return
-		}
-		dialog.ShowError(fmt.Errorf("cameras download failed: %w", err), w)
+		cancelled := err.Error() == "download cancelled"
+		fyne.Do(func() {
+			progressDialog.Hide()
+			if !cancelled {
+				dialog.ShowError(fmt.Errorf("cameras download failed: %w", err), w)
+			}
+		})
 		return
 	}
 	if shared.GetGoos() != "windows" {
@@ -449,10 +483,12 @@ func updateVersion(existingVersion, targetVersion string, w fyne.Window) {
 		log.Printf("No config to copy from %s: %v", existingDir, err)
 	}
 
-	progressBar.SetValue(1.0)
-	progressDialog.Hide()
-	dialog.ShowInformation("Update Complete", fmt.Sprintf("Successfully updated Cameras module to version %s", targetInstallVersion), w)
+	fyne.Do(func() {
+		progressBar.SetValue(1.0)
+		progressDialog.Hide()
+		dialog.ShowInformation("Update Complete", fmt.Sprintf("Successfully updated Cameras module to version %s", targetInstallVersion), w)
 
-	recomputeVersionList(w)
-	checkForNewerVersion()
+		recomputeVersionList(w)
+		checkForNewerVersion()
+	})
 }
