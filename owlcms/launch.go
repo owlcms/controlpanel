@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -83,7 +84,7 @@ func clearRuntimeState() {
 	}
 }
 
-func restoreOwlcmsStoppedUI(version string, stopBtn, launchButton *widget.Button, message string) {
+func restoreOwlcmsStoppedUI(stopBtn, launchButton *widget.Button, message string) {
 	currentProcess = nil
 	killedByUs = false
 	stopInProgress.Store(false)
@@ -312,7 +313,7 @@ func buildOwlcmsCommand(params *owlcmsLaunchParams, useDaemonWrapper bool) *exec
 
 // recordOwlcmsStart writes the PID file and runtime metadata after a successful cmd.Start().
 func recordOwlcmsStart(pid int, version, port string, daemon bool) *shared.RuntimeMetadata {
-	if err := os.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
+	if err := os.WriteFile(pidFilePath, fmt.Appendf(nil, "%d\n", pid), 0644); err != nil {
 		log.Printf("Failed to write PID to PID file: %v\n", err)
 	} else {
 		log.Printf("Wrote PID %d to PID file %s\n", pid, pidFilePath)
@@ -493,6 +494,9 @@ var (
 	startupLogUpdating bool
 	startupLogLastText string
 	startupLogHeader   *widget.Label
+	// set once the readiness probe reports OWLCMS is serving requests; used by
+	// tailStartupLog so it doesn't warn about a missing "OWLCMS Ready." line.
+	startupReadyReported atomic.Bool
 )
 
 func acquireJavaLock() (*flock.Flock, error) {
@@ -679,6 +683,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 		configureTailLogLink(version, appDir)
 
 		// Start monitoring for startup.log (when supported by the OWLCMS version)
+		startupReadyReported.Store(false)
 		go monitorStartupLog(appDir, version)
 
 		done := make(chan error, 1)
@@ -692,7 +697,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 			if err := <-monitorChan; err != nil {
 				if killedByUs || stopInProgress.Load() {
 					log.Printf("OWLCMS process %d stopped before readiness during intentional stop: %v", pid, err)
-					restoreOwlcmsStoppedUI(version, stopBtn, launchButton, fmt.Sprintf("OWLCMS %s (PID: %d) was stopped before becoming ready", version, pid))
+					restoreOwlcmsStoppedUI(stopBtn, launchButton, fmt.Sprintf("OWLCMS %s (PID: %d) was stopped before becoming ready", version, pid))
 					return
 				}
 
@@ -729,8 +734,13 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 				configureTailLogLink(version, appDir)
 			})
 
-			// Close the startup log area now that OWLCMS is ready
-			hideStartupLogArea()
+			// The readiness probe goes through HTTP, so it only succeeds once OWLCMS
+			// serves requests. When the version writes startup.log, let tailStartupLog
+			// close the area after it has displayed the final lines.
+			startupReadyReported.Store(true)
+			if !owlcmsSupportsStartupLog(version) {
+				hideStartupLogArea()
+			}
 
 			err := <-done
 
@@ -982,7 +992,7 @@ func monitorStartupLog(appDir, version string) {
 		stopCh := startupLogStopCh
 		startupLogMu.Unlock()
 		go func() {
-			for i := 0; i < 12; i++ {
+			for i := range 12 {
 				select {
 				case <-stopCh:
 					return
@@ -1002,7 +1012,7 @@ func monitorStartupLog(appDir, version string) {
 
 	// Real file monitoring
 	// Check every 500ms for up to 60 seconds
-	for i := 0; i < 120; i++ {
+	for range 120 {
 		if _, err := os.Stat(startupLogPath); err == nil {
 			log.Printf("Found startup.log, starting to tail it\n")
 			// Tail the file for 60 seconds
@@ -1074,11 +1084,15 @@ func tailStartupLog(logPath string) {
 			}
 		}
 
+		if foundReady || startupReadyReported.Load() {
+			break
+		}
+
 		time.Sleep(500 * time.Millisecond)
 	}
 
 	// If we didn't find "OWLCMS Ready." after timeout, show error dialog
-	if !foundReady {
+	if !foundReady && !startupReadyReported.Load() {
 		logsDir := filepath.Dir(logPath)
 		fyne.Do(func() {
 			dialog.ShowCustomConfirm("OWLCMS Startup Issue", "Open Logs Folder", "Close",

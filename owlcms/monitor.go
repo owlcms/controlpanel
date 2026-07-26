@@ -35,7 +35,10 @@ func monitorProcess(done <-chan error, port string) chan error {
 				result <- fmt.Errorf("timed out waiting for process to become ready")
 				return
 			case <-ticker.C:
-				if shared.CheckPort(port) == nil {
+				// Readiness must go through HTTP: OWLCMS binds the port before it
+				// initializes the database, and holds the bootstrap page until the
+				// database is ready. A bare TCP connect would report ready too early.
+				if shared.CheckPortReady(port) == nil {
 					result <- nil
 					return
 				}

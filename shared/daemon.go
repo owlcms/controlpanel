@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -577,12 +578,29 @@ func EnsurePortFree(port string) error {
 }
 
 // CheckPort tries to connect to localhost:port and returns nil if a TCP server is listening.
+// This answers "is the port occupied", not "is the application usable": a server may accept
+// connections long before it is able to serve requests. Use CheckPortReady for readiness.
 func CheckPort(port string) error {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", strings.TrimSpace(port)), 2*time.Second)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
+	return nil
+}
+
+// CheckPortReady issues an HTTP request to localhost:port and returns nil once the
+// application answers. Unlike CheckPort, this goes through the servlet/handler layer,
+// so applications that hold requests until they are initialized (OWLCMS blocks the
+// bootstrap page until the database is ready) only answer when they are actually usable.
+// The timeout is generous because the request is expected to be held during startup.
+func CheckPortReady(port string) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%s", strings.TrimSpace(port)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 	return nil
 }
 
