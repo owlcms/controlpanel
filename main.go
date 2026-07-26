@@ -38,7 +38,7 @@ type myTheme struct {
 }
 
 func newMyTheme() *myTheme {
-	return &myTheme{Theme: theme.LightTheme()}
+	return &myTheme{Theme: theme.DefaultTheme()}
 }
 
 func (m myTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
@@ -59,7 +59,9 @@ func (m myTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) colo
 		// Much darker red for Firmata buttons
 		return color.RGBA{R: 100, G: 10, B: 10, A: 255}
 	}
-	return m.Theme.Color(name, variant)
+	// The panel always renders with a light background, so resolve remaining
+	// colors against the light variant regardless of the user preference.
+	return m.Theme.Color(name, theme.VariantLight)
 }
 
 func getInstanceIdentity() (string, string) {
@@ -175,7 +177,10 @@ func startControlPanelUI(w fyne.Window, a fyne.App, initialWindowSize fyne.Size)
 		container.NewTabItem("Arduino Devices", firmataTabContent),
 	}
 
-	if shared.GetGoos() != "darwin" {
+	// The video tabs are hidden on macOS unless OWLCMS_REPLAYS is set, since the
+	// cameras/replays binaries are not generally available there.
+	_, replaysEnabled := os.LookupEnv("OWLCMS_REPLAYS")
+	if shared.GetGoos() != "darwin" || replaysEnabled {
 		camerasTabContent := cameras.CreateTab(w)
 		replaysTabContent := replays.CreateTab(w)
 		tabs = append(tabs,
@@ -270,7 +275,6 @@ func setInitialWindowGeometry(w fyne.Window, size fyne.Size) {
 
 func scheduleStartupRepaint(w fyne.Window) {
 	for _, delay := range []time.Duration{250 * time.Millisecond, time.Second} {
-		delay := delay
 		time.AfterFunc(delay, func() {
 			fyne.Do(func() {
 				log.Printf("window diagnostics [startup-repaint-%s]: refreshing Fyne content and native window", delay)
@@ -314,25 +318,12 @@ func logFyneWindowDiagnostics(label string, w fyne.Window) {
 
 func scheduleWindowDiagnostics(w fyne.Window) {
 	for _, delay := range []time.Duration{250 * time.Millisecond, time.Second, 3 * time.Second} {
-		delay := delay
 		time.AfterFunc(delay, func() {
 			fyne.Do(func() {
 				logWindowDiagnostics(fmt.Sprintf("post-show-%s", delay), w)
 			})
 		})
 	}
-}
-
-func anyProgramRunning() bool {
-	owlcmsRunning := owlcms.IsRunning()
-	trackerRunning := tracker.IsRunning()
-	firmataRunning := firmata.IsRunning()
-	camerasRunning := cameras.IsRunning()
-	replaysRunning := replays.IsRunning()
-
-	log.Printf("anyProgramRunning: OWLCMS=%v, Tracker=%v, Firmata=%v, Cameras=%v, Replays=%v", owlcmsRunning, trackerRunning, firmataRunning, camerasRunning, replaysRunning)
-
-	return owlcmsRunning || trackerRunning || firmataRunning || camerasRunning || replaysRunning
 }
 
 func anyDaemonRunning() bool {
@@ -450,11 +441,14 @@ func cleanupJavaVersions(w fyne.Window) {
 				if len(removed) == 0 {
 					dialog.ShowInformation("Cleanup Complete", "No obsolete Java versions found.", w)
 				} else {
-					message := "Cleanup results:\n\n"
+					var message strings.Builder
+					message.WriteString("Cleanup results:\n\n")
 					for _, v := range removed {
-						message += "• " + v + "\n"
+						message.WriteString("• ")
+						message.WriteString(v)
+						message.WriteString("\n")
 					}
-					dialog.ShowInformation("Cleanup Complete", message, w)
+					dialog.ShowInformation("Cleanup Complete", message.String(), w)
 				}
 			}()
 		},
@@ -489,11 +483,14 @@ func cleanupNodeVersions(w fyne.Window) {
 				if len(removed) == 0 {
 					dialog.ShowInformation("Cleanup Complete", "No obsolete Node.js versions found.", w)
 				} else {
-					message := "Cleanup results:\n\n"
+					var message strings.Builder
+					message.WriteString("Cleanup results:\n\n")
 					for _, v := range removed {
-						message += "• " + v + "\n"
+						message.WriteString("• ")
+						message.WriteString(v)
+						message.WriteString("\n")
 					}
-					dialog.ShowInformation("Cleanup Complete", message, w)
+					dialog.ShowInformation("Cleanup Complete", message.String(), w)
 				}
 			}()
 		},
@@ -775,89 +772,6 @@ func configureTrackerConnectionForHeadlessTandem(owlcmsVersion, trackerVersion s
 	log.Printf("Configured OWLCMS %s to connect to Tracker %s using host=%s port=%s url=%s; updated %s",
 		owlcmsVersion, trackerVersion, trackerHost, trackerPort, trackerURL, owlcms.GetReleaseEnvPath(owlcmsVersion))
 	return nil
-}
-
-// runHeadlessDaemons launches OWLCMS and/or Tracker in daemon mode without any UI,
-// then exits.  This is intended for boot-time systemd/init usage.
-func runHeadlessDaemons(owlcmsVersion, trackerVersion string, enableEmbeddedMQTT bool) {
-	// Force daemon mode on so the spawned processes are detached.
-	_ = shared.SetRunAsDaemonEnabled(true)
-
-	var failed bool
-	var resolvedOwlcmsVersion string
-	var resolvedTrackerVersion string
-
-	if owlcmsVersion != "" {
-		version, err := resolveVersion("owlcms", owlcmsVersion, owlcms.GetAllInstalledVersions(), owlcms.GetInstallDir(), owlcms.GetLastRunVersion)
-		if err != nil {
-			log.Printf("ERROR: %v", err)
-			fmt.Fprintf(os.Stderr, "owlcms: %v\n", err)
-			failed = true
-		} else {
-			resolvedOwlcmsVersion = version
-		}
-	}
-
-	if trackerVersion != "" {
-		version, err := resolveVersion("tracker", trackerVersion, tracker.GetAllInstalledVersions(), tracker.GetInstallDir(), tracker.GetLastRunVersion)
-		if err != nil {
-			log.Printf("ERROR: %v", err)
-			fmt.Fprintf(os.Stderr, "tracker: %v\n", err)
-			failed = true
-		} else {
-			resolvedTrackerVersion = version
-		}
-	}
-
-	if resolvedOwlcmsVersion != "" && resolvedTrackerVersion != "" {
-		if err := configureTrackerConnectionForHeadlessTandem(resolvedOwlcmsVersion, resolvedTrackerVersion); err != nil {
-			log.Printf("ERROR: failed to configure OWLCMS tracker connection: %v", err)
-			fmt.Fprintf(os.Stderr, "owlcms/tracker tandem: %v\n", err)
-			failed = true
-		}
-	}
-
-	if failed {
-		os.Exit(1)
-	}
-
-	// Launch Tracker BEFORE OWLCMS because under systemd OWLCMS's
-	// LaunchDaemon blocks on cmd.Wait() (foreground supervision).
-	// Tracker's LaunchDaemon starts the process and returns once the
-	// port is ready, so it must go first.
-	if resolvedTrackerVersion != "" {
-		if meta, running := shared.CheckDaemonRunning(tracker.RuntimeMetadataPath()); running {
-			log.Printf("Tracker %s is already running (PID %d, port %s)", meta.Version, meta.PID, meta.Port)
-			fmt.Printf("tracker %s already running (PID %d, port %s)\n", meta.Version, meta.PID, meta.Port)
-		} else {
-			if err := tracker.LaunchDaemon(resolvedTrackerVersion); err != nil {
-				log.Printf("ERROR: failed to launch tracker %s: %v", resolvedTrackerVersion, err)
-				fmt.Fprintf(os.Stderr, "tracker %s: %v\n", resolvedTrackerVersion, err)
-				failed = true
-			} else {
-				fmt.Printf("tracker %s started successfully\n", resolvedTrackerVersion)
-			}
-		}
-	}
-
-	if resolvedOwlcmsVersion != "" {
-		if meta, running := shared.CheckDaemonRunning(owlcms.RuntimeMetadataPath()); running {
-			log.Printf("OWLCMS %s is already running (PID %d, port %s)", meta.Version, meta.PID, meta.Port)
-			fmt.Printf("owlcms %s already running (PID %d, port %s)\n", meta.Version, meta.PID, meta.Port)
-		} else {
-			if err := owlcms.LaunchDaemon(resolvedOwlcmsVersion, enableEmbeddedMQTT); err != nil {
-				log.Printf("ERROR: failed to launch owlcms %s: %v", resolvedOwlcmsVersion, err)
-				fmt.Fprintf(os.Stderr, "owlcms %s: %v\n", resolvedOwlcmsVersion, err)
-				failed = true
-			} else {
-				fmt.Printf("owlcms %s started successfully\n", resolvedOwlcmsVersion)
-			}
-		}
-	}
-
-	if failed {
-		os.Exit(1)
-	}
 }
 
 type runningModuleProcess struct {
