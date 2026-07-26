@@ -147,8 +147,8 @@ func NormalizeVersionMetadata(metadata string) string {
 
 // StripMetadata removes metadata (everything after +) from a version string.
 func StripMetadata(version string) string {
-	if plusIndex := strings.Index(version, "+"); plusIndex != -1 {
-		return version[:plusIndex]
+	if before, _, ok := strings.Cut(version, "+"); ok {
+		return before
 	}
 	return version
 }

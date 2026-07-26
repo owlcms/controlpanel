@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,8 +41,8 @@ func ParseVersionWithBuild(version string) (string, string) {
 	if err != nil {
 		// Metadata is an opaque extension and may contain characters such as
 		// underscores or accented Unicode that strict SemVer rejects.
-		if plusIndex := strings.Index(version, "+"); plusIndex >= 0 {
-			return version[:plusIndex], version[plusIndex+1:]
+		if before, after, ok := strings.Cut(version, "+"); ok {
+			return before, after
 		}
 		return version, ""
 	}
@@ -1025,8 +1026,8 @@ func GetVersionsWithBuildMetadata(baseDir string) ([]string, error) {
 
 	// Sort in reverse (newest first)
 	var sorted []string
-	for i := len(semvers) - 1; i >= 0; i-- {
-		originalVersion := versionMap[semvers[i].String()]
+	for _, semver := range slices.Backward(semvers) {
+		originalVersion := versionMap[semver.String()]
 		sorted = append(sorted, originalVersion)
 	}
 

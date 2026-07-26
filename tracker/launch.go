@@ -158,7 +158,7 @@ func prepareTrackerLaunch(version string) (*trackerLaunchParams, error) {
 
 // recordTrackerStart writes the PID file and runtime metadata after a successful cmd.Start().
 func recordTrackerStart(pid int, version, port string, daemon bool) *shared.RuntimeMetadata {
-	if err := os.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
+	if err := os.WriteFile(pidFilePath, fmt.Appendf(nil, "%d\n", pid), 0644); err != nil {
 		log.Printf("Failed to write PID to PID file: %v\n", err)
 	} else {
 		log.Printf("Wrote PID %d to PID file %s\n", pid, pidFilePath)
@@ -197,7 +197,6 @@ func GetLastRunVersion() string {
 func LaunchDaemon(version string) error {
 	log.Printf("LaunchDaemon: starting tracker %s headlessly", version)
 
-	initConfig()
 	if err := InitEnv(); err != nil {
 		return fmt.Errorf("failed to initialize environment: %w", err)
 	}
@@ -268,7 +267,6 @@ func LaunchDaemon(version string) error {
 func LaunchForeground(version string) error {
 	log.Printf("LaunchForeground: starting tracker %s", version)
 
-	initConfig()
 	if err := InitEnv(); err != nil {
 		return fmt.Errorf("failed to initialize environment: %w", err)
 	}

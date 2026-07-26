@@ -17,7 +17,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	"github.com/Masterminds/semver/v3"
 )
 
 // Release represents a GitHub release
@@ -536,37 +535,4 @@ func updateExplanation() {
 	singleOrMultiVersionLabel.Wrapping = fyne.TextWrapWord
 	singleOrMultiVersionLabel.Show()
 	singleOrMultiVersionLabel.Refresh()
-}
-
-func stripVersionMetadata(version string) string {
-	v, err := semver.NewVersion(version)
-	if err != nil {
-		return version
-	}
-	if v.Prerelease() != "" {
-		return fmt.Sprintf("%d.%d.%d-%s", v.Major(), v.Minor(), v.Patch(), v.Prerelease())
-	}
-	return fmt.Sprintf("%d.%d.%d", v.Major(), v.Minor(), v.Patch())
-}
-
-func setupDownloadContainer() {
-	if len(allReleases) > 0 {
-		downloadContainer.Objects = []fyne.CanvasObject{
-			updateTitle,
-			singleOrMultiVersionLabel,
-			downloadButtonTitle,
-			releaseDropdown,
-		}
-	} else {
-		downloadContainer.Objects = []fyne.CanvasObject{
-			widget.NewLabel("You are not connected to the Internet. Available updates cannot be shown."),
-		}
-	}
-
-	updateTitle.Show()
-	releaseDropdown.Hide()
-	prereleaseCheckbox.Hide()
-	if downloadContainer != nil {
-		downloadContainer.Refresh()
-	}
 }

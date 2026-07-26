@@ -12,18 +12,6 @@ import (
 	"github.com/magiconair/properties"
 )
 
-var (
-	launcherVersion = "1.0.0"
-	buildVersion    = "_TAG_"
-	environment     *properties.Properties
-)
-
-func initConfig() {
-	if buildVersion != ("_" + "TAG" + "_") {
-		launcherVersion = buildVersion
-	}
-}
-
 func getInstallDir() string {
 	switch shared.GetGoos() {
 	case "windows":
@@ -68,11 +56,9 @@ func InitEnv() error {
 		log.Printf("Created env.properties at %s", envFilePath)
 	}
 
-	props, err := properties.LoadFile(envFilePath, properties.UTF8)
-	if err != nil {
+	if _, err := properties.LoadFile(envFilePath, properties.UTF8); err != nil {
 		return err
 	}
-	environment = props
 	return nil
 }
 

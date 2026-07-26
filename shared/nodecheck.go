@@ -19,10 +19,10 @@ import (
 
 // NodeRelease represents a Node.js release from the official API
 type NodeRelease struct {
-	Version string      `json:"version"`
-	Date    string      `json:"date"`
-	Files   []string    `json:"files"`
-	LTS     interface{} `json:"lts"` // Can be false or a string like "Jod"
+	Version string   `json:"version"`
+	Date    string   `json:"date"`
+	Files   []string `json:"files"`
+	LTS     any      `json:"lts"` // Can be false or a string like "Jod"
 }
 
 // ExtractNodeVersion parses a version string and returns major, minor, patch
@@ -256,7 +256,7 @@ func FindLatestNodeRelease(version string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Node.js API returned status %d", resp.StatusCode)
+		return "", fmt.Errorf("unexpected status %d from Node.js API", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -302,11 +302,11 @@ func scanEnvPropertiesForNodeVersions(trackerInstallDir string) ([]string, error
 			return "", err
 		}
 		// Simple parsing - look for NODE_VERSION=value
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
+		lines := strings.SplitSeq(string(content), "\n")
+		for line := range lines {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "NODE_VERSION=") {
-				version := strings.TrimPrefix(line, "NODE_VERSION=")
+			if after, ok := strings.CutPrefix(line, "NODE_VERSION="); ok {
+				version := after
 				return strings.TrimSpace(version), nil
 			}
 		}
@@ -431,7 +431,7 @@ func DownloadAndInstallNode(version string, progressCallback func(downloaded, to
 	nodePath := findNodeExecutable(extractedDir, nodeExe)
 
 	if nodePath == "" {
-		return "", fmt.Errorf("Node.js executable not found in extracted directory: %s", extractedDir)
+		return "", fmt.Errorf("no Node.js executable found in extracted directory: %s", extractedDir)
 	}
 
 	// Make it executable on Unix systems

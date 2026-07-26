@@ -307,7 +307,7 @@ func ensureReleaseEnvFromCurrentParent(releaseVersion string) (*properties.Prope
 		return nil, fmt.Errorf("creating release env directory: %w", err)
 	}
 
-	releaseProps := properties.NewProperties()
+	var releaseProps *properties.Properties
 	releaseExists := false
 	if _, err := os.Stat(releaseEnvPath); err == nil {
 		releaseExists = true
@@ -351,8 +351,8 @@ func ensureReleaseEnvFromCurrentParent(releaseVersion string) (*properties.Prope
 	if releaseExists {
 		if content, err := os.ReadFile(releaseEnvPath); err == nil {
 			var comments []string
-			lines := strings.Split(string(content), "\n")
-			for _, line := range lines {
+			lines := strings.SplitSeq(string(content), "\n")
+			for line := range lines {
 				trimmed := strings.TrimSpace(line)
 				if strings.HasPrefix(trimmed, "#") {
 					comments = append(comments, line)
@@ -534,8 +534,8 @@ func EnsureParentEnvDefaults() error {
 	commentBlock := ""
 	if content, err := os.ReadFile(envFilePath); err == nil {
 		var comments []string
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
+		lines := strings.SplitSeq(string(content), "\n")
+		for line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "#") {
 				comments = append(comments, line)

@@ -118,7 +118,7 @@ func rmAffectedProcesses(session uint32) ([]FileLockingProcess, error) {
 		return locking, nil
 	}
 
-	return nil, fmt.Errorf("Restart Manager process list changed while querying the file")
+	return nil, fmt.Errorf("process list changed while querying the file with Restart Manager")
 }
 
 func rmCall(operation string, procedure *windows.LazyProc, arguments ...uintptr) error {
@@ -130,5 +130,5 @@ func rmCall(operation string, procedure *windows.LazyProc, arguments ...uintptr)
 }
 
 func rmResultError(operation string, result uintptr) error {
-	return fmt.Errorf("Restart Manager %s: %w", operation, syscall.Errno(result))
+	return fmt.Errorf("restart manager %s: %w", operation, syscall.Errno(result))
 }

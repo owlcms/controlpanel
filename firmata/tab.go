@@ -19,7 +19,6 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/Masterminds/semver/v3"
 )
 
 var (
@@ -55,30 +54,6 @@ var (
 func initMain() {
 	installDir = getInstallDirWithLogging()
 	javacheck.InitJavaCheck(installDir, GetTemurinVersion)
-}
-
-type myTheme struct {
-	fyne.Theme
-}
-
-func newMyTheme() *myTheme {
-	return &myTheme{Theme: theme.LightTheme()}
-}
-
-func (m myTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	switch name {
-	case theme.ColorNameSuccess:
-		// Much darker green color
-		return color.RGBA{R: 15, G: 80, B: 15, A: 255}
-	case theme.ColorNameBackground:
-		return color.White
-	case theme.ColorNameForeground:
-		return color.Black
-	case theme.ColorNameShadow:
-		return color.NRGBA{R: 0, G: 0, B: 0, A: 40}
-	default:
-		return m.Theme.Color(name, variant)
-	}
 }
 
 func resolveInstallDir(logSelection bool) string {
@@ -168,38 +143,6 @@ func computeVersionScrollHeight(numVersions int) float32 {
 	return float32(minHeight + (rowHeight * min(numVersions, 4)))
 }
 
-func removeAllVersions() {
-	entries, err := os.ReadDir(installDir)
-	if err != nil {
-		log.Printf("Failed to read firmata directory: %v\n", err)
-		dialog.ShowError(fmt.Errorf("failed to read firmata directory: %w", err), fyne.CurrentApp().Driver().AllWindows()[0])
-		return
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			_, err := semver.NewVersion(entry.Name())
-			if err == nil {
-				dirPath := filepath.Join(installDir, entry.Name())
-				if err := os.RemoveAll(dirPath); err != nil {
-					log.Printf("Failed to remove directory %s: %v\n", dirPath, err)
-					dialog.ShowError(fmt.Errorf("failed to remove directory %s: %w", dirPath, err), fyne.CurrentApp().Driver().AllWindows()[0])
-					return
-				}
-			}
-		}
-	}
-
-	log.Println("All versions removed successfully")
-	dialog.ShowInformation("Success", "All versions removed successfully", fyne.CurrentApp().Driver().AllWindows()[0])
-	getAllInstalledVersions()
-	updateTitle.ParseMarkdown("All Versions Removed.")
-	downloadButtonTitle.SetText("Click here to install a version.")
-	downloadButtonTitle.Refresh()
-	updateTitle.Refresh()
-	recomputeVersionList(mainWindow)
-}
-
 func uninstallAll() {
 	dialog.ShowConfirm("Confirm Uninstall", "This will remove all the data and configurations currently stored.\nIf you proceed, this cannot be undone. Restarting the program will create new data.", func(confirm bool) {
 		if confirm {
@@ -215,18 +158,6 @@ func uninstallAll() {
 			}
 		}
 	}, fyne.CurrentApp().Driver().AllWindows()[0])
-}
-
-func removeJava() {
-	javaDir := filepath.Join(installDir, "java17")
-	err := os.RemoveAll(javaDir)
-	if err != nil {
-		log.Printf("Failed to remove Java: %v\n", err)
-		dialog.ShowError(fmt.Errorf("failed to remove Java: %w", err), fyne.CurrentApp().Driver().AllWindows()[0])
-	} else {
-		log.Println("Java removed successfully")
-		dialog.ShowInformation("Success", "Java removed successfully", fyne.CurrentApp().Driver().AllWindows()[0])
-	}
 }
 
 // IsRunning returns true if Firmata is currently running
@@ -348,7 +279,7 @@ func CreateTab(w fyne.Window) *fyne.Container {
 		versionContainer,
 	)
 
-	runningContent = container.NewMax(startupLogHost)
+	runningContent = container.NewStack(startupLogHost)
 	runningContent.Hide()
 
 	modeStack = container.NewStack(selectionContent, runningContent)
@@ -722,13 +653,6 @@ func downloadAndInstallVersion(version string, w fyne.Window) {
 		// Refresh the tab mode to show the download section properly
 		setFirmataTabMode(w)
 	}()
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func checkForNewerVersion() {

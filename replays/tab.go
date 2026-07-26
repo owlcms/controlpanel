@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"controlpanel/shared"
 
@@ -88,7 +87,6 @@ func HandleSignalCleanup() {
 
 // CreateTab creates and returns the Video tab content
 func CreateTab(w fyne.Window) *fyne.Container {
-	initConfig()
 	mainWindow = w
 
 	log.Println("Creating Video tab content")
@@ -403,8 +401,4 @@ func ShowDownloadables() {
 	if downloadContainer != nil {
 		downloadContainer.Refresh()
 	}
-}
-
-func getVersionDir(version string) string {
-	return filepath.Join(installDir, version)
 }

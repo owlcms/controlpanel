@@ -41,7 +41,7 @@ func selectedLocaleEnv() (string, string) {
 }
 
 func fallbackLocaleFromEnvironment() string {
-	for _, candidate := range strings.Split(os.Getenv("LANGUAGE"), ":") {
+	for candidate := range strings.SplitSeq(os.Getenv("LANGUAGE"), ":") {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" || isPOSIXLocale(candidate) {
 			continue

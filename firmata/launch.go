@@ -258,7 +258,7 @@ func launchFirmata(version string, launchButton *widget.Button) error {
 
 	// Store the PID in the PID file and globally
 	javaPID = cmd.Process.Pid
-	if err := os.WriteFile(pidFilePath, []byte(fmt.Sprintf("%d\n", javaPID)), 0644); err != nil {
+	if err := os.WriteFile(pidFilePath, fmt.Appendf(nil, "%d\n", javaPID), 0644); err != nil {
 		log.Printf("Failed to write PID to PID file: %v\n", err)
 	} else {
 		log.Printf("Wrote PID %d to PID file %s\n", javaPID, pidFilePath)
@@ -434,19 +434,6 @@ func showStartupLogArea() {
 	}(stopCh)
 }
 
-// appendStartupLogText adds text to the startup log display
-func appendStartupLogText(text string) {
-	if startupLogText != nil {
-		startupLogUpdating = true
-		currentText := startupLogText.Text
-		startupLogLastText = currentText + text
-		startupLogText.SetText(startupLogLastText)
-		// Scroll to bottom
-		startupLogText.CursorRow = len(strings.Split(startupLogLastText, "\n")) - 1
-		startupLogUpdating = false
-	}
-}
-
 // setStartupLogText sets the complete text in the startup log display
 func setStartupLogText(text string) {
 	if startupLogText != nil {
@@ -521,7 +508,7 @@ func monitorStartupLog(appDir, version string) {
 
 	// Real file monitoring
 	// Check every 500ms for up to 60 seconds
-	for i := 0; i < 120; i++ {
+	for range 120 {
 		if _, err := os.Stat(startupLogPath); err == nil {
 			log.Printf("Found startup.log, starting to tail it\n")
 			// Tail the file for 60 seconds

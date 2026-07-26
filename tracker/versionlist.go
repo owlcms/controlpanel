@@ -613,27 +613,6 @@ func recomputeVersionList(w fyne.Window) {
 	log.Println("Version list reinitialized")
 }
 
-func removeAllVersions() {
-	entries, err := os.ReadDir(installDir)
-	if err != nil {
-		log.Printf("Failed to read tracker directory: %v\n", err)
-		return
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			baseVersion, _ := shared.ParseVersionWithBuild(entry.Name())
-			if _, err := semver.NewVersion(baseVersion); err == nil {
-				versionDir := filepath.Join(installDir, entry.Name())
-				log.Printf("Removing version directory: %s\n", versionDir)
-				os.RemoveAll(versionDir)
-			}
-		}
-	}
-	// After removing all version directories, update UI in case no versions remain
-	resetToExplainMode()
-}
-
 func uninstallAll() {
 	dialog.ShowConfirm("Confirm Uninstall", "This will remove all the data and configurations currently stored.\nIf you proceed, this cannot be undone.", func(confirm bool) {
 		if !confirm {

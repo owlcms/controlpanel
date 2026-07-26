@@ -80,7 +80,7 @@ func CheckAndInstallJava(requiredVersion string, statusLabel *widget.Label, w fy
 	}
 
 	if err := javaCheck(statusLabel); err != nil {
-		dialog.ShowError(fmt.Errorf("Java runtime check/install failed: %w", err), w)
+		dialog.ShowError(fmt.Errorf("check/install of Java runtime failed: %w", err), w)
 		return err
 	}
 	return nil
@@ -213,11 +213,11 @@ func scanEnvPropertiesForJavaVersions(owlcmsInstallDir, firmataInstallDir string
 			return "", err
 		}
 		// Simple parsing - look for TEMURIN_VERSION=value
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
+		lines := strings.SplitSeq(string(content), "\n")
+		for line := range lines {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "TEMURIN_VERSION=") {
-				version := strings.TrimPrefix(line, "TEMURIN_VERSION=")
+			if after, ok := strings.CutPrefix(line, "TEMURIN_VERSION="); ok {
+				version := after
 				return strings.TrimSpace(version), nil
 			}
 		}
@@ -394,7 +394,7 @@ func CleanupObsoleteJavaVersions(owlcmsInstallDir, firmataInstallDir string, sta
 			copy(sortedVersions, versions)
 
 			// Sort using CompareJDKVersions (latest first)
-			for i := 0; i < len(sortedVersions); i++ {
+			for i := range sortedVersions {
 				for j := i + 1; j < len(sortedVersions); j++ {
 					if CompareJDKVersions(sortedVersions[j], sortedVersions[i]) {
 						sortedVersions[i], sortedVersions[j] = sortedVersions[j], sortedVersions[i]

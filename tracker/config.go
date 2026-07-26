@@ -13,9 +13,7 @@ import (
 )
 
 var (
-	launcherVersion = "1.0.0"
-	buildVersion    = "_TAG_"
-	environment     *properties.Properties
+	environment *properties.Properties
 )
 
 // SetInstallDir overrides the tracker installation directory for this process.
@@ -28,12 +26,6 @@ func SetInstallDir(dir string) {
 	environment = nil
 	lockFilePath = filepath.Join(installDir, "tracker.lock")
 	pidFilePath = filepath.Join(installDir, "tracker.pid")
-}
-
-func initConfig() {
-	if buildVersion != ("_" + "TAG" + "_") {
-		launcherVersion = buildVersion
-	}
 }
 
 // GetPort returns the configured port for tracker, defaulting to "8096"

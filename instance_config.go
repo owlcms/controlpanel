@@ -366,8 +366,8 @@ func deriveInstanceName(base string) string {
 	}
 
 	for _, suffix := range []string{"-controlpanel", "-owlcms", "-tracker"} {
-		if strings.HasSuffix(base, suffix) {
-			trimmed := strings.TrimSpace(strings.TrimSuffix(base, suffix))
+		if before, ok := strings.CutSuffix(base, suffix); ok {
+			trimmed := strings.TrimSpace(before)
 			if trimmed != "" {
 				return trimmed
 			}

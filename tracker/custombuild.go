@@ -42,8 +42,8 @@ func readCustomBuildPlugins(versionDir string) ([]string, bool) {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "plugins:") {
-			raw := strings.TrimPrefix(line, "plugins:")
+		if after, ok := strings.CutPrefix(line, "plugins:"); ok {
+			raw := after
 			raw = strings.TrimSpace(raw)
 			if raw == "" || raw == "(none)" {
 				return []string{}, true

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -39,7 +40,6 @@ var (
 	installAvailableLink *widget.Hyperlink
 	releaseNotesLink     *widget.Hyperlink
 	availableVersion     string
-	availableVersionURL  string
 	fetchReleasesFromURL = func(url string) ([]Release, error) {
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Get(url)
@@ -69,21 +69,11 @@ func catalogNeedsPrereleases(explicitRequest bool, installedVersions []string) b
 	if explicitRequest {
 		return true
 	}
-	for _, v := range installedVersions {
-		if containsPreReleaseTag(v) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(installedVersions, containsPreReleaseTag)
 }
 
 func releaseCatalogHasPrerelease(releases []string) bool {
-	for _, release := range releases {
-		if containsPreReleaseTag(release) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(releases, containsPreReleaseTag)
 }
 
 func fetchReleasesForCatalog(includePrereleases bool) ([]string, error) {

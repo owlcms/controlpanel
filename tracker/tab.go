@@ -24,7 +24,6 @@ var (
 	// TEMPORARY TEST FLAG: when true, treat Tracker as not installed.
 	// Keep variable for testing; default to false to use real detection.
 	forceUninstalledTracker   = false
-	tabRoot                   *fyne.Container
 	currentProcess            *exec.Cmd
 	currentVersion            string
 	statusLabel               *widget.Label
@@ -116,8 +115,6 @@ func HandleSignalCleanup() {
 
 // CreateTab creates and returns the Tracker tab content
 func CreateTab(w fyne.Window) *fyne.Container {
-	initConfig()
-
 	// Store main window reference
 	mainWindow = w
 
@@ -197,7 +194,6 @@ func CreateTab(w fyne.Window) *fyne.Container {
 		nil,               // Right
 		versionContainer,  // Center (expands to fill space)
 	)
-	tabRoot = mainContent
 	statusLabel.SetText("Checking installation status...")
 	statusLabel.Refresh()
 	statusLabel.Show()
@@ -524,13 +520,6 @@ func ShowDownloadables() {
 	if downloadContainer != nil {
 		downloadContainer.Refresh()
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // resetToExplainMode updates the tab UI to show the explanation and Install button

@@ -20,7 +20,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	"github.com/Masterminds/semver/v3"
 )
 
 var (
@@ -48,15 +47,13 @@ var (
 	topRunContent             *fyne.Container
 	topModeStack              *fyne.Container
 	mainWindow                fyne.Window
-	mainApp                   fyne.App
 )
 
 // CreateTab creates and returns the OWLCMS tab content
 // This should be called from the main application after the window is created
-func CreateTab(w fyne.Window, app fyne.App) *fyne.Container {
+func CreateTab(w fyne.Window, _ fyne.App) *fyne.Container {
 	// Store main window reference
 	mainWindow = w
-	mainApp = app
 
 	log.Println("Creating OWLCMS tab content")
 
@@ -166,7 +163,7 @@ func CreateTab(w fyne.Window, app fyne.App) *fyne.Container {
 		versionContainer,
 	)
 
-	runningContent = container.NewMax(startupLogHost)
+	runningContent = container.NewStack(startupLogHost)
 	runningContent.Hide()
 
 	modeStack = container.NewStack(selectionContent, runningContent)
@@ -878,7 +875,6 @@ func checkForNewerVersion() {
 
 			// Store the available version for the install link
 			availableVersion = release
-			availableVersionURL = releaseURL
 
 			// Update release notes link
 			parsedURL, _ := url.Parse(releaseURL)
@@ -992,38 +988,6 @@ func computeVersionScrollHeight(numVersions int) float32 {
 	return float32(minHeight + (rowHeight * min(numVersions, 4)))
 }
 
-func removeAllVersions() {
-	entries, err := os.ReadDir(installDir)
-	if err != nil {
-		log.Printf("Failed to read owlcms directory: %v\n", err)
-		dialog.ShowError(fmt.Errorf("failed to read owlcms directory: %w", err), fyne.CurrentApp().Driver().AllWindows()[0])
-		return
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			_, err := semver.NewVersion(entry.Name())
-			if err == nil {
-				dirPath := filepath.Join(installDir, entry.Name())
-				if err := os.RemoveAll(dirPath); err != nil {
-					log.Printf("Failed to remove directory %s: %v\n", dirPath, err)
-					dialog.ShowError(fmt.Errorf("failed to remove directory %s: %w", dirPath, err), fyne.CurrentApp().Driver().AllWindows()[0])
-					return
-				}
-			}
-		}
-	}
-
-	log.Println("All versions removed successfully")
-	dialog.ShowInformation("Success", "All versions removed successfully", fyne.CurrentApp().Driver().AllWindows()[0])
-	getAllInstalledVersions()
-	updateTitle.ParseMarkdown("All Versions Removed.")
-	downloadButtonTitle.SetText("Click here to install a version.")
-	downloadButtonTitle.Refresh()
-	updateTitle.Refresh()
-	setOwlcmsTabMode(mainWindow)
-}
-
 func uninstallAll() {
 	dialog.ShowConfirm("Confirm Uninstall", "This will remove all the data and configurations currently stored.\nIf you proceed, this cannot be undone. Restarting the program will create new data.", func(confirm bool) {
 		if confirm {
@@ -1039,25 +1003,6 @@ func uninstallAll() {
 			}
 		}
 	}, fyne.CurrentApp().Driver().AllWindows()[0])
-}
-
-func removeJava() {
-	javaDir := filepath.Join(installDir, "java17")
-	err := os.RemoveAll(javaDir)
-	if err != nil {
-		log.Printf("Failed to remove Java: %v\n", err)
-		dialog.ShowError(fmt.Errorf("failed to remove Java: %w", err), fyne.CurrentApp().Driver().AllWindows()[0])
-	} else {
-		log.Println("Java removed successfully")
-		dialog.ShowInformation("Success", "Java removed successfully", fyne.CurrentApp().Driver().AllWindows()[0])
-	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // HandleSignalCleanup handles cleanup when the application receives a signal

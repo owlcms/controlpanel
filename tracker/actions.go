@@ -90,7 +90,7 @@ func InstallRelease(downloadVersion, installVersion string, downloadProgress, ex
 	zipPath := filepath.Join(installDir, assetName)
 	extractPath := filepath.Join(installDir, installVersion)
 	if _, err := os.Stat(extractPath); err == nil {
-		return ActionResult{}, fmt.Errorf("Tracker version %q already exists", installVersion)
+		return ActionResult{}, fmt.Errorf("tracker version %q already exists", installVersion)
 	} else if !os.IsNotExist(err) {
 		return ActionResult{}, fmt.Errorf("checking install directory %s: %w", extractPath, err)
 	}
@@ -243,9 +243,9 @@ func RemoveInstalledVersion(version string) error {
 	}
 	dir := filepath.Join(installDir, version)
 	if info, err := os.Stat(dir); err != nil {
-		return fmt.Errorf("Tracker version %q is not installed: %w", version, err)
+		return fmt.Errorf("tracker version %q is not installed: %w", version, err)
 	} else if !info.IsDir() {
-		return fmt.Errorf("Tracker version %q is not a directory", version)
+		return fmt.Errorf("tracker version %q is not a directory", version)
 	}
 	return os.RemoveAll(dir)
 }

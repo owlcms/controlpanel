@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -588,7 +589,7 @@ func restoreLocalFilesFromPreviousVersion(newDir, oldDir string) error {
 	oldJar := filepath.Join(oldDir, "owlcms.jar")
 
 	// Helper function for logging (uses standard log which goes to both console and control-panel.log)
-	logBoth := func(format string, args ...interface{}) {
+	logBoth := func(format string, args ...any) {
 		log.Printf(format, args...)
 	}
 
@@ -999,7 +1000,7 @@ func getLocalFiles(dir string, topLevelDirs []string) (map[string]struct{}, erro
 		}
 
 		// Only consider files/dirs under topLevelDirs
-		topLevel := strings.Split(relPath, string(os.PathSeparator))[0]
+		topLevel, _, _ := strings.Cut(relPath, string(os.PathSeparator))
 		if !containsString(topLevelDirs, topLevel) {
 			return nil
 		}
@@ -1147,12 +1148,7 @@ func extractLocalFromJar(jarPath, localDir string, topLevelDirs []string) error 
 
 // containsString returns true if s is in list.
 func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, s)
 }
 
 // isCompleteDirectoryNew checks if the current path is the start of a complete new directory
@@ -1195,7 +1191,7 @@ func isCompleteDirectoryNew(currentPath string, remainingLocalFiles []string, ol
 
 // removeEmptyDirs removes a directory and its parent directories if they are empty.
 // It stops at the basePath and won't go beyond it.
-func removeEmptyDirs(dirPath string, basePath string, logBoth func(string, ...interface{})) error {
+func removeEmptyDirs(dirPath string, basePath string, logBoth func(string, ...any)) error {
 	// Ensure we don't go beyond basePath
 	relPath, err := filepath.Rel(basePath, dirPath)
 	if err != nil || strings.HasPrefix(relPath, "..") {

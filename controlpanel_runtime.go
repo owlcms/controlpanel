@@ -91,7 +91,7 @@ func writeCurrentControlPanelRuntime() error {
 	if err := writeFileAtomically(controlPanelRuntimeMetadataPath(), content, 0644); err != nil {
 		return fmt.Errorf("write control panel runtime metadata: %w", err)
 	}
-	if err := writeFileAtomically(controlPanelPIDPath(), []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
+	if err := writeFileAtomically(controlPanelPIDPath(), fmt.Appendf(nil, "%d\n", pid), 0644); err != nil {
 		return fmt.Errorf("write control panel PID file: %w", err)
 	}
 
