@@ -177,17 +177,12 @@ func startControlPanelUI(w fyne.Window, a fyne.App, initialWindowSize fyne.Size)
 		container.NewTabItem("Arduino Devices", firmataTabContent),
 	}
 
-	// The video tabs are hidden on macOS unless OWLCMS_REPLAYS is set, since the
-	// cameras/replays binaries are not generally available there.
-	_, replaysEnabled := os.LookupEnv("OWLCMS_REPLAYS")
-	if shared.GetGoos() != "darwin" || replaysEnabled {
-		camerasTabContent := cameras.CreateTab(w)
-		replaysTabContent := replays.CreateTab(w)
-		tabs = append(tabs,
-			container.NewTabItem("Cameras", camerasTabContent),
-			container.NewTabItem("Replays", replaysTabContent),
-		)
-	}
+	camerasTabContent := cameras.CreateTab(w)
+	replaysTabContent := replays.CreateTab(w)
+	tabs = append(tabs,
+		container.NewTabItem("Cameras", camerasTabContent),
+		container.NewTabItem("Replays", replaysTabContent),
+	)
 
 	mainContent := container.NewAppTabs(tabs...)
 
