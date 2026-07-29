@@ -78,8 +78,8 @@ func releaseCatalogHasPrerelease(releases []string) bool {
 
 func fetchReleasesForCatalog(includePrereleases bool) ([]string, error) {
 
-	stableURL := "https://api.github.com/repos/owlcms/owlcms4/releases"
-	preURL := "https://api.github.com/repos/owlcms/owlcms4-prerelease/releases"
+	stableURL := "https://api.github.com/repos/owlcms/releases/releases"
+	preURL := "https://api.github.com/repos/owlcms/prereleases/releases"
 
 	stable, err := fetchReleasesFromURL(stableURL)
 	if err != nil {

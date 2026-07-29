@@ -25,9 +25,9 @@ func TestFetchReleasesForCatalogIncludesPrereleasesWhenRequested(t *testing.T) {
 	fetchReleasesFromURL = func(url string) ([]Release, error) {
 		called = append(called, url)
 		switch url {
-		case "https://api.github.com/repos/owlcms/owlcms4/releases":
+		case "https://api.github.com/repos/owlcms/releases/releases":
 			return []Release{{TagName: "3.2.0"}}, nil
-		case "https://api.github.com/repos/owlcms/owlcms4-prerelease/releases":
+		case "https://api.github.com/repos/owlcms/prereleases/releases":
 			return []Release{{TagName: "3.3.0-rc03"}}, nil
 		default:
 			t.Fatalf("unexpected URL: %s", url)
@@ -40,8 +40,8 @@ func TestFetchReleasesForCatalogIncludesPrereleasesWhenRequested(t *testing.T) {
 		t.Fatalf("fetchReleasesForCatalog(true): %v", err)
 	}
 	if !reflect.DeepEqual(called, []string{
-		"https://api.github.com/repos/owlcms/owlcms4/releases",
-		"https://api.github.com/repos/owlcms/owlcms4-prerelease/releases",
+			"https://api.github.com/repos/owlcms/releases/releases",
+			"https://api.github.com/repos/owlcms/prereleases/releases",
 	}) {
 		t.Fatalf("unexpected fetch sequence: %v", called)
 	}
