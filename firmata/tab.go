@@ -602,8 +602,10 @@ func downloadAndInstallVersion(version string, w fyne.Window) {
 	go func() {
 		extractPath := filepath.Join(owlcmsDir, version)
 		if err := shared.EnsureDir0755(extractPath); err != nil {
-			progressDialog.Hide()
-			dialog.ShowError(fmt.Errorf("creating firmata version directory: %w", err), w)
+			fyne.Do(func() {
+				progressDialog.Hide()
+				dialog.ShowError(fmt.Errorf("creating firmata version directory: %w", err), w)
+			})
 			return
 		}
 		extractPath = filepath.Join(extractPath, fileName)
@@ -613,30 +615,33 @@ func downloadAndInstallVersion(version string, w fyne.Window) {
 		progressCallback := func(downloaded, total int64) {
 			if total > 0 {
 				percentage := float64(downloaded) / float64(total)
-				progressBar.SetValue(percentage)
+				fyne.Do(func() {
+					progressBar.SetValue(percentage)
+				})
 			}
 		}
 		err := shared.DownloadArchive(zipURL, extractPath, progressCallback, cancel)
 		if err != nil {
-			progressDialog.Hide()
-			if err.Error() == "download cancelled" {
-				return
-			}
-			dialog.ShowError(fmt.Errorf("download failed: %w", err), w)
+			cancelled := err.Error() == "download cancelled"
+			fyne.Do(func() {
+				progressDialog.Hide()
+				if !cancelled {
+					dialog.ShowError(fmt.Errorf("download failed: %w", err), w)
+				}
+			})
 			return
 		}
 
 		// Log when extraction is done
 		log.Println("Extraction completed")
 
-		// Hide progress dialog before showing any error dialogs
-		progressDialog.Hide()
-
-		// Initialize env.properties after successful installation
-		if !EnsureEnvWithDialog(w) {
+		if err := EnsureParentEnvDefaults(); err != nil {
 			log.Println("Installation completed but env.properties initialization failed")
-			// Error dialog already shown; refresh UI and return
-			setFirmataTabMode(w)
+			fyne.Do(func() {
+				progressDialog.Hide()
+				customdialog.ShowWideError(fmt.Errorf("installation completed but failed to create configuration file: %w\n\nYou may need to check permissions on the installation directory", err), w)
+				setFirmataTabMode(w)
+			})
 			return
 		}
 
@@ -647,11 +652,12 @@ func downloadAndInstallVersion(version string, w fyne.Window) {
 				"The program files have been extracted to the above directory.",
 			version, extractPath)
 
-		dialog.ShowInformation("Installation Complete", message, w)
-		HideDownloadables()
-
-		// Refresh the tab mode to show the download section properly
-		setFirmataTabMode(w)
+		fyne.Do(func() {
+			progressDialog.Hide()
+			dialog.ShowInformation("Installation Complete", message, w)
+			HideDownloadables()
+			setFirmataTabMode(w)
+		})
 	}()
 }
 

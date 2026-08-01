@@ -405,7 +405,7 @@ func adjustUpdateButton(mostRecent string, version string, updateButton *widget.
 	if shared.CompareVersions(mostRecent, version) {
 		updateButton.SetText(fmt.Sprintf("Update to %s", mostRecent))
 		updateButton.OnTapped = func() {
-			updateVersion(version, mostRecent, w)
+			go updateVersion(version, mostRecent, w)
 		}
 		updateButton.Refresh()
 	} else {
@@ -436,32 +436,41 @@ func updateVersion(existingVersion string, targetVersion string, w fyne.Window) 
 
 	extractDir := filepath.Join(installDir, targetInstallVersion)
 	if err := shared.EnsureDir0755(extractDir); err != nil {
-		dialog.ShowError(fmt.Errorf("creating install directory: %w", err), w)
+		fyne.Do(func() {
+			dialog.ShowError(fmt.Errorf("creating install directory: %w", err), w)
+		})
 		return
 	}
 	extractPath := filepath.Join(extractDir, fileName)
 
 	cancel := make(chan bool)
-	progressDialog, progressBar := customdialog.NewDownloadDialog(
-		"Updating owlcms-firmata",
-		w,
-		cancel)
-	progressDialog.Show()
-
-	defer progressDialog.Hide()
+	var progressDialog dialog.Dialog
+	var progressBar *widget.ProgressBar
+	fyne.DoAndWait(func() {
+		progressDialog, progressBar = customdialog.NewDownloadDialog(
+			"Updating owlcms-firmata",
+			w,
+			cancel)
+		progressDialog.Show()
+	})
 
 	progressCallback := func(downloaded, total int64) {
 		if total > 0 {
 			percentage := float64(downloaded) / float64(total)
-			progressBar.SetValue(percentage)
+			fyne.Do(func() {
+				progressBar.SetValue(percentage)
+			})
 		}
 	}
 	err := shared.DownloadArchive(jarURL, extractPath, progressCallback, cancel)
 	if err != nil {
-		if err.Error() == "download cancelled" {
-			return
-		}
-		dialog.ShowError(fmt.Errorf("download failed: %w", err), w)
+		cancelled := err.Error() == "download cancelled"
+		fyne.Do(func() {
+			progressDialog.Hide()
+			if !cancelled {
+				dialog.ShowError(fmt.Errorf("download failed: %w", err), w)
+			}
+		})
 		return
 	}
 
@@ -483,14 +492,13 @@ func updateVersion(existingVersion string, targetVersion string, w fyne.Window) 
 		}
 	}
 
-	dialog.ShowInformation("Update Complete", fmt.Sprintf("Successfully updated to version %s", targetInstallVersion), w)
-
-	// Recompute the version list
-	recomputeVersionList(w)
-
-	// Recompute the downloadTitle
-	latestInstalled = findLatestInstalled()
-	checkForNewerVersion()
+	fyne.Do(func() {
+		progressDialog.Hide()
+		dialog.ShowInformation("Update Complete", fmt.Sprintf("Successfully updated to version %s", targetInstallVersion), w)
+		recomputeVersionList(w)
+		latestInstalled = findLatestInstalled()
+		checkForNewerVersion()
+	})
 }
 
 func filterVersions(versions []string, curVersion string) []string {
