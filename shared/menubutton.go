@@ -99,7 +99,6 @@ func (b *menuBarButton) MouseMoved(*desktop.MouseEvent) {
 
 func (b *menuBarButton) MouseOut() {
 	b.hovered = false
-	b.menuOpen = false
 	b.updateBackground()
 }
 
@@ -107,9 +106,14 @@ func (b *menuBarButton) Tapped(*fyne.PointEvent) {
 	b.menuOpen = true
 	b.updateBackground()
 	showCompactMenu(b.label, b.menuItems, b, b.Theme(), func() {
-		b.menuOpen = false
-		b.updateBackground()
+		b.clearHighlight()
 	})
+}
+
+func (b *menuBarButton) clearHighlight() {
+	b.hovered = false
+	b.menuOpen = false
+	b.updateBackground()
 }
 
 func (b *menuBarButton) updateBackground() {
@@ -140,18 +144,11 @@ func showCompactMenu(label string, menuItems []*fyne.MenuItem, anchor fyne.Canva
 		return
 	}
 
-	menu := widget.NewMenu(fyne.NewMenu("", menuItems...))
 	compactTheme := compactMenuTheme{Theme: menuTheme}
-	topInset := canvas.NewRectangle(compactTheme.Color(theme.ColorNameMenuBackground, fyne.CurrentApp().Settings().ThemeVariant()))
-	topInset.SetMinSize(fyne.NewSize(1, 3))
-	leftInset := canvas.NewRectangle(compactTheme.Color(theme.ColorNameMenuBackground, fyne.CurrentApp().Settings().ThemeVariant()))
-	leftInset.SetMinSize(fyne.NewSize(3, 1))
-	rightInset := canvas.NewRectangle(compactTheme.Color(theme.ColorNameMenuBackground, fyne.CurrentApp().Settings().ThemeVariant()))
-	rightInset.SetMinSize(fyne.NewSize(3, 1))
-	content := container.NewBorder(topInset, nil, leftInset, rightInset, container.NewThemeOverride(menu, compactTheme))
-	popup := widget.NewPopUp(container.NewThemeOverride(content, compactTheme), menuCanvas)
+	popup := widget.NewPopUpMenu(fyne.NewMenu("", menuItems...), menuCanvas)
 	container.NewThemeOverride(popup, compactTheme)
-	menu.OnDismiss = func() {
+	popup.Resize(popup.MinSize())
+	popup.OnDismiss = func() {
 		popup.Hide()
 		onDismiss()
 	}
