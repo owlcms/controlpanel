@@ -20,6 +20,7 @@ import (
 	"controlpanel/replays"
 	"controlpanel/shared"
 	"controlpanel/tracker"
+	"controlpanel/video"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -32,6 +33,24 @@ import (
 
 var exitInProgress bool
 var controlPanelLogPath string
+
+const (
+	moduleOWLCMSPreference  = "modules.owlcms.visible"
+	moduleTrackerPreference = "modules.tracker.visible"
+	moduleFirmataPreference = "modules.firmata.visible"
+	moduleVideoPreference   = "modules.video.visible"
+	moduleCamerasPreference = "modules.cameras.visible"
+	moduleReplaysPreference = "modules.replays.visible"
+)
+
+type moduleVisibility struct {
+	owlcms  bool
+	tracker bool
+	firmata bool
+	video   bool
+	cameras bool
+	replays bool
+}
 
 type myTheme struct {
 	fyne.Theme
@@ -71,6 +90,39 @@ func getInstanceIdentity() (string, string) {
 	}
 
 	return "app.owlcms.controlpanel." + instance, fmt.Sprintf("OWLCMS Control Panel (%s)", instance)
+}
+
+func hasInstalledVersions(installDir string) bool {
+	entries, err := os.ReadDir(installDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+func loadModuleVisibility(preferences fyne.Preferences, defaults moduleVisibility) moduleVisibility {
+	return moduleVisibility{
+		owlcms:  preferences.BoolWithFallback(moduleOWLCMSPreference, defaults.owlcms),
+		tracker: preferences.BoolWithFallback(moduleTrackerPreference, defaults.tracker),
+		firmata: preferences.BoolWithFallback(moduleFirmataPreference, defaults.firmata),
+		video:   preferences.BoolWithFallback(moduleVideoPreference, defaults.video),
+		cameras: preferences.BoolWithFallback(moduleCamerasPreference, defaults.cameras),
+		replays: preferences.BoolWithFallback(moduleReplaysPreference, defaults.replays),
+	}
+}
+
+func saveModuleVisibility(preferences fyne.Preferences, visibility moduleVisibility) {
+	preferences.SetBool(moduleOWLCMSPreference, visibility.owlcms)
+	preferences.SetBool(moduleTrackerPreference, visibility.tracker)
+	preferences.SetBool(moduleFirmataPreference, visibility.firmata)
+	preferences.SetBool(moduleVideoPreference, visibility.video)
+	preferences.SetBool(moduleCamerasPreference, visibility.cameras)
+	preferences.SetBool(moduleReplaysPreference, visibility.replays)
 }
 
 func main() {
@@ -170,21 +222,16 @@ func startControlPanelUI(w fyne.Window, a fyne.App, initialWindowSize fyne.Size)
 	owlcmsTabContent := owlcms.CreateTab(w, a)
 	trackerTabContent := tracker.CreateTab(w)
 	firmataTabContent := firmata.CreateTab(w)
-
-	tabs := []*container.TabItem{
-		container.NewTabItem("OWLCMS", owlcmsTabContent),
-		container.NewTabItem("Tracker", trackerTabContent),
-		container.NewTabItem("Arduino Devices", firmataTabContent),
-	}
-
+	videoTabContent := video.CreateTab(w)
 	camerasTabContent := cameras.CreateTab(w)
 	replaysTabContent := replays.CreateTab(w)
-	tabs = append(tabs,
-		container.NewTabItem("Cameras", camerasTabContent),
-		container.NewTabItem("Replays", replaysTabContent),
-	)
-
-	mainContent := container.NewAppTabs(tabs...)
+	owlcmsTab := container.NewTabItem("OWLCMS", owlcmsTabContent)
+	trackerTab := container.NewTabItem("Tracker", trackerTabContent)
+	firmataTab := container.NewTabItem("Arduino Devices", firmataTabContent)
+	videoTab := container.NewTabItem("Video", videoTabContent)
+	camerasTab := container.NewTabItem("Cameras", camerasTabContent)
+	replaysTab := container.NewTabItem("Replays", replaysTabContent)
+	mainContent := container.NewAppTabs()
 
 	// Refresh tracker version list when its tab is selected (to update OWLCMS version warning)
 	mainContent.OnSelected = func(tab *container.TabItem) {
@@ -192,6 +239,76 @@ func startControlPanelUI(w fyne.Window, a fyne.App, initialWindowSize fyne.Size)
 			tracker.OnTabSelected()
 		}
 	}
+
+	selection := loadModuleVisibility(a.Preferences(), moduleVisibility{
+		owlcms:  true,
+		tracker: true,
+		firmata: hasInstalledVersions(firmata.GetInstallDir()),
+		video:   hasInstalledVersions(video.GetInstallDir()),
+		cameras: hasInstalledVersions(cameras.GetInstallDir()),
+		replays: hasInstalledVersions(replays.GetInstallDir()),
+	})
+	var modulesMenu *fyne.Menu
+	refreshTabs := func() {
+		visible := make([]*container.TabItem, 0, 6)
+		if selection.owlcms {
+			visible = append(visible, owlcmsTab)
+		}
+		if selection.tracker {
+			visible = append(visible, trackerTab)
+		}
+		if selection.firmata {
+			visible = append(visible, firmataTab)
+		}
+		if selection.video {
+			visible = append(visible, videoTab)
+		}
+		if selection.cameras {
+			visible = append(visible, camerasTab)
+		}
+		if selection.replays {
+			visible = append(visible, replaysTab)
+		}
+		if len(visible) == 0 {
+			selection.owlcms = true
+			visible = append(visible, owlcmsTab)
+		}
+		mainContent.SetItems(visible)
+		mainContent.Select(visible[0])
+		for _, item := range modulesMenu.Items {
+			switch item.Label {
+			case "OWLCMS":
+				item.Checked = selection.owlcms
+			case "Tracker":
+				item.Checked = selection.tracker
+			case "Arduino Devices":
+				item.Checked = selection.firmata
+			case "Video":
+				item.Checked = selection.video
+			case "Cameras":
+				item.Checked = selection.cameras
+			case "Replays":
+				item.Checked = selection.replays
+			}
+		}
+		modulesMenu.Refresh()
+	}
+	newModuleItem := func(label string, selected *bool) *fyne.MenuItem {
+		return fyne.NewMenuItem(label, func() {
+			*selected = !*selected
+			refreshTabs()
+			saveModuleVisibility(a.Preferences(), selection)
+		})
+	}
+	modulesMenu = fyne.NewMenu("Modules",
+		newModuleItem("OWLCMS", &selection.owlcms),
+		newModuleItem("Tracker", &selection.tracker),
+		newModuleItem("Arduino Devices", &selection.firmata),
+		newModuleItem("Video", &selection.video),
+		newModuleItem("Cameras", &selection.cameras),
+		newModuleItem("Replays", &selection.replays),
+	)
+	refreshTabs()
 
 	// Create dummy/loading content with the correct sizing to anchor window dimensions upfront
 	dummyBackground := canvas.NewRectangle(color.Transparent)
@@ -201,7 +318,7 @@ func startControlPanelUI(w fyne.Window, a fyne.App, initialWindowSize fyne.Size)
 
 	// Setup menus before content so Fyne initializes the menu canvas before
 	// the first content layout pass.
-	mainMenu := setupMenus(w)
+	mainMenu := setupMenus(w, modulesMenu)
 
 	// Combine into a stack so that dummyContent is initially visible, layout doesn't break,
 	// and we avoid swapping the root content in a way that causes rendering failures.
@@ -218,7 +335,7 @@ func startControlPanelUI(w fyne.Window, a fyne.App, initialWindowSize fyne.Size)
 	owlp := owlcms.GetInstallDir()
 	tp := tracker.GetInstallDir()
 	fp := firmata.GetInstallDir()
-	vp := cameras.GetInstallDir()
+	vp := video.GetInstallDir()
 
 	mods := shared.DetectInstalledModules(owlp, tp, fp, vp)
 
@@ -330,7 +447,7 @@ func anyDaemonRunning() bool {
 }
 
 func closableProgramNames() []string {
-	programs := make([]string, 0, 5)
+	programs := make([]string, 0, 6)
 	if owlcms.IsLocalProcessRunning() {
 		programs = append(programs, "OWLCMS")
 	}
@@ -345,6 +462,9 @@ func closableProgramNames() []string {
 	}
 	if replays.IsRunning() {
 		programs = append(programs, "Replays")
+	}
+	if video.IsRunning() {
+		programs = append(programs, "Video")
 	}
 	return programs
 }
@@ -387,6 +507,7 @@ func stopClosableRunningProcesses(w fyne.Window) {
 	firmata.StopRunningProcess(w)
 	cameras.StopRunningProcess(w)
 	replays.StopRunningProcess(w)
+	video.StopRunningProcess(w)
 }
 
 func stopClosableRunningProcessesForSignal() {
@@ -409,6 +530,10 @@ func stopClosableRunningProcessesForSignal() {
 	if replays.IsRunning() {
 		log.Println("Signal cleanup: forcefully stopping Replays process")
 		replays.HandleSignalCleanup()
+	}
+	if video.IsRunning() {
+		log.Println("Signal cleanup: forcefully stopping Video process")
+		video.HandleSignalCleanup()
 	}
 }
 
@@ -545,7 +670,7 @@ func requestExit(w fyne.Window) {
 }
 
 // setupMenus sets up the application menu bar.
-func setupMenus(w fyne.Window) *fyne.MainMenu {
+func setupMenus(w fyne.Window, modulesMenu *fyne.Menu) *fyne.MainMenu {
 	// Use "Quit" on all platforms - Fyne checks for this exact label
 	// and won't add its own duplicate if it finds one.
 	fileMenu := fyne.NewMenu(
@@ -567,6 +692,7 @@ func setupMenus(w fyne.Window) *fyne.MainMenu {
 			owlcms.RefreshVersionList(w)
 			tracker.RefreshVersionList(w)
 			firmata.RefreshVersionList(w)
+			video.RefreshVersionList(w)
 			cameras.RefreshVersionList(w)
 			replays.RefreshVersionList(w)
 		}),
@@ -602,7 +728,7 @@ func setupMenus(w fyne.Window) *fyne.MainMenu {
 			dialog.ShowInformation("About", "OWLCMS Launcher version "+shared.GetLauncherVersion(), w)
 		}),
 	)
-	menu := fyne.NewMainMenu(fileMenu, helpMenu)
+	menu := fyne.NewMainMenu(fileMenu, modulesMenu, helpMenu)
 	w.SetMainMenu(menu)
 	return menu
 }
