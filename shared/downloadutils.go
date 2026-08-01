@@ -125,13 +125,18 @@ func ExtractZip(src, dest string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open zip file %s: %w", src, err)
 	}
+	stripRoot := singleZipRoot(r.File)
 
 	for _, f := range r.File {
-		if f.Name == "Procfile" || f.Name == "system.properties" {
+		if isZipJunk(f.Name) || f.Name == "Procfile" || f.Name == "system.properties" {
 			continue
 		}
 
-		fpath := filepath.Join(dest, f.Name)
+		entryName := stripZipRoot(f.Name, stripRoot)
+		if entryName == "" {
+			continue
+		}
+		fpath := filepath.Join(dest, filepath.FromSlash(entryName))
 
 		if f.FileInfo().IsDir() {
 			if err := EnsureDir0755(fpath); err != nil {
@@ -180,6 +185,50 @@ func ExtractZip(src, dest string) error {
 	}
 
 	return nil
+}
+
+func singleZipRoot(files []*zip.File) string {
+	var root string
+	for _, f := range files {
+		if isZipJunk(f.Name) {
+			continue
+		}
+		name := strings.Trim(filepath.ToSlash(f.Name), "/")
+		if name == "" {
+			continue
+		}
+		parts := strings.Split(name, "/")
+		if len(parts) < 2 {
+			if f.FileInfo().IsDir() {
+				continue
+			}
+			return ""
+		}
+		if root == "" {
+			root = parts[0]
+		} else if root != parts[0] {
+			return ""
+		}
+	}
+	return root
+}
+
+func stripZipRoot(name, root string) string {
+	name = strings.Trim(filepath.ToSlash(name), "/")
+	if root != "" {
+		name = strings.TrimPrefix(name, root+"/")
+	}
+	return name
+}
+
+func isZipJunk(name string) bool {
+	for _, part := range strings.Split(strings.Trim(filepath.ToSlash(name), "/"), "/") {
+		if part == ".DS_Store" || part == "__MACOSX" || part == ".AppleDouble" ||
+			part == "Thumbs.db" || part == "desktop.ini" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
 }
 
 // ExtractTarGz extracts a tar.gz archive to the specified destination directory.

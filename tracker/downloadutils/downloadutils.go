@@ -109,12 +109,20 @@ func ExtractZip(zipPath, destDir string, progress func(extracted, total int64)) 
 	if err := shared.EnsureDir0755(destDir); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
+	stripRoot := singleZipRoot(r.File)
 
 	totalFiles := int64(len(r.File))
 	var extracted int64
 
 	for _, f := range r.File {
-		fpath := filepath.Join(destDir, f.Name)
+		if isZipJunk(f.Name) {
+			continue
+		}
+		entryName := stripZipRoot(f.Name, stripRoot)
+		if entryName == "" {
+			continue
+		}
+		fpath := filepath.Join(destDir, filepath.FromSlash(entryName))
 
 		// Check for ZipSlip vulnerability
 		if !strings.HasPrefix(fpath, filepath.Clean(destDir)+string(os.PathSeparator)) {
@@ -170,4 +178,48 @@ func ExtractZip(zipPath, destDir string, progress func(extracted, total int64)) 
 
 	log.Printf("Successfully extracted %d files to: %s\n", totalFiles, destDir)
 	return nil
+}
+
+func singleZipRoot(files []*zip.File) string {
+	var root string
+	for _, f := range files {
+		if isZipJunk(f.Name) {
+			continue
+		}
+		name := strings.Trim(filepath.ToSlash(f.Name), "/")
+		if name == "" {
+			continue
+		}
+		parts := strings.Split(name, "/")
+		if len(parts) < 2 {
+			if f.FileInfo().IsDir() {
+				continue
+			}
+			return ""
+		}
+		if root == "" {
+			root = parts[0]
+		} else if root != parts[0] {
+			return ""
+		}
+	}
+	return root
+}
+
+func stripZipRoot(name, root string) string {
+	name = strings.Trim(filepath.ToSlash(name), "/")
+	if root != "" {
+		name = strings.TrimPrefix(name, root+"/")
+	}
+	return name
+}
+
+func isZipJunk(name string) bool {
+	for _, part := range strings.Split(strings.Trim(filepath.ToSlash(name), "/"), "/") {
+		if part == ".DS_Store" || part == "__MACOSX" || part == ".AppleDouble" ||
+			part == "Thumbs.db" || part == "desktop.ini" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
 }

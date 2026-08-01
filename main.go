@@ -201,13 +201,17 @@ func startControlPanelUI(w fyne.Window, a fyne.App, initialWindowSize fyne.Size)
 
 	// Setup menus before content so Fyne initializes the menu canvas before
 	// the first content layout pass.
-	setupMenus(w)
+	mainMenu := setupMenus(w)
 
 	// Combine into a stack so that dummyContent is initially visible, layout doesn't break,
 	// and we avoid swapping the root content in a way that causes rendering failures.
 	mainContent.Hide()
 	rootContainer := container.NewStack(dummyContent, mainContent)
-	w.SetContent(rootContainer)
+	var rootContent fyne.CanvasObject = rootContainer
+	if shared.GetGoos() == "darwin" {
+		rootContent = container.NewBorder(createInWindowMainMenu(mainMenu), nil, nil, nil, rootContainer)
+	}
+	w.SetContent(rootContent)
 
 	// Show installed modules popup
 	// Query the actual install directories from each package
@@ -540,8 +544,8 @@ func requestExit(w fyne.Window) {
 	confirmDialog.Show()
 }
 
-// setupMenus sets up the application menu bar
-func setupMenus(w fyne.Window) {
+// setupMenus sets up the application menu bar.
+func setupMenus(w fyne.Window) *fyne.MainMenu {
 	// Use "Quit" on all platforms - Fyne checks for this exact label
 	// and won't add its own duplicate if it finds one.
 	fileMenu := fyne.NewMenu(
@@ -552,12 +556,12 @@ func setupMenus(w fyne.Window) {
 				dialog.ShowError(fmt.Errorf("failed to open directory: %w", err), w)
 			}
 		}),
-		fyne.NewMenuItem("Cleanup Obsolete Java Versions", func() {
-			cleanupJavaVersions(w)
-		}),
-		fyne.NewMenuItem("Cleanup Obsolete Node.js Versions", func() {
-			cleanupNodeVersions(w)
-		}),
+		// fyne.NewMenuItem("Cleanup Obsolete Java Versions", func() {
+		// 	cleanupJavaVersions(w)
+		// }),
+		// fyne.NewMenuItem("Cleanup Obsolete Node.js Versions", func() {
+		// 	cleanupNodeVersions(w)
+		// }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Refresh", func() {
 			owlcms.RefreshVersionList(w)
@@ -600,6 +604,18 @@ func setupMenus(w fyne.Window) {
 	)
 	menu := fyne.NewMainMenu(fileMenu, helpMenu)
 	w.SetMainMenu(menu)
+	return menu
+}
+
+// createInWindowMainMenu mirrors the native menu bar for platforms where it
+// appears outside the application window.
+func createInWindowMainMenu(mainMenu *fyne.MainMenu) fyne.CanvasObject {
+	buttons := make([]fyne.CanvasObject, 0, len(mainMenu.Items))
+	for _, menu := range mainMenu.Items {
+		buttons = append(buttons, shared.CreateMenuBarButton(menu.Label, menu.Items))
+	}
+
+	return container.NewVBox(container.NewHBox(buttons...), widget.NewSeparator())
 }
 
 // setupCleanupOnExit sets up cleanup when the window is closed
