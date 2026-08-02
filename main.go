@@ -56,6 +56,11 @@ type myTheme struct {
 	fyne.Theme
 }
 
+var checkboxOutlineIcon = fyne.NewStaticResource("checkbox-outline.svg", []byte(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+	<rect x="2.5" y="2.5" width="19" height="19" rx="2" fill="none" stroke="currentColor" stroke-width="0.5"/>
+</svg>`))
+
 func newMyTheme() *myTheme {
 	return &myTheme{Theme: theme.DefaultTheme()}
 }
@@ -81,6 +86,13 @@ func (m myTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) colo
 	// The panel always renders with a light background, so resolve remaining
 	// colors against the light variant regardless of the user preference.
 	return m.Theme.Color(name, theme.VariantLight)
+}
+
+func (m myTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	if name == theme.IconNameCheckButton {
+		return checkboxOutlineIcon
+	}
+	return m.Theme.Icon(name)
 }
 
 func getInstanceIdentity() (string, string) {
