@@ -1,4 +1,6 @@
 __debug*
+.DS_Store
+/controlpanel
 /fyne-cross
 5*
 6*
@@ -18,9 +20,14 @@ tmp-pkg/usr/local/share/applications/controlpanel.desktop
 tmp-pkg/usr/local/share/pixmaps/controlpanel.png
 *.deb
 dist/ReleaseNotes.md
-dist/darwin-amd64
-dist/darwin-arm64
+dist/RELEASE.md
+dist/darwin-*/
 dist/notarized/
+dist/iss/
+dist/msix/
+dist/*.dmg
+dist/*.exe
+dist/*.msix
 /owlcms.app
 
 controlpanel.exe
