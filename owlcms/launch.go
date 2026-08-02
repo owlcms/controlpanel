@@ -680,6 +680,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 			shared.OpenFileExplorer(appDir)
 		}
 		appDirLink.Show()
+		configureTrackerConnectionUI(version)
 		configureTailLogLink(version, appDir)
 
 		// Start monitoring for startup.log (when supported by the OWLCMS version)
@@ -731,6 +732,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 					shared.OpenFileExplorer(appDir)
 				}
 				appDirLink.Show()
+				configureTrackerConnectionUI(version)
 				configureTailLogLink(version, appDir)
 			})
 
@@ -759,6 +761,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 					stopContainer.Hide()
 					launchButton.Hide()
 					urlLink.Hide()
+					trackerConnectionRow.Hide()
 					appDirLink.Hide()
 					if tailLogLink != nil {
 						tailLogLink.Hide()
@@ -797,6 +800,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 				setOwlcmsTabMode(mainWindow)
 
 				urlLink.Hide()
+				trackerConnectionRow.Hide()
 				appDirLink.Hide()
 				if tailLogLink != nil {
 					tailLogLink.Hide()

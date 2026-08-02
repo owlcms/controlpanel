@@ -24,6 +24,7 @@ import (
 
 var (
 	statusLabel      *widget.Label
+	statusRow        *fyne.Container
 	stopButton       *widget.Button
 	versionContainer *fyne.Container
 	stopContainer    *fyne.Container
@@ -34,6 +35,9 @@ var (
 	downloadContainer         *fyne.Container
 	downloadsShown            bool
 	urlLink                   *widget.Hyperlink
+	trackerConnectionLabel    *widget.Label
+	trackerURLLink            *widget.Hyperlink
+	trackerConnectionRow      *fyne.Container
 	appDirLink                *widget.Hyperlink
 	tailLogLink               *widget.Hyperlink
 	startupLogText            *widget.Entry
@@ -67,11 +71,16 @@ func CreateTab(w fyne.Window, _ fyne.App) *fyne.Container {
 	stopButton = widget.NewButton("Stop", nil)
 	stopButton.Importance = widget.HighImportance
 	statusLabel = widget.NewLabel("Initializing OWLCMS Control Panel...")
-	statusLabel.Wrapping = fyne.TextWrapWord
+	statusLabel.Wrapping = fyne.TextWrapOff
 
 	// Create URL hyperlink
 	urlLink = widget.NewHyperlink("", nil)
 	urlLink.Hide()
+	statusRow = container.NewHBox(statusLabel, urlLink)
+	trackerConnectionLabel = widget.NewLabel("")
+	trackerURLLink = widget.NewHyperlink("", nil)
+	trackerConnectionRow = container.NewHBox(trackerConnectionLabel, trackerURLLink)
+	trackerConnectionRow.Hide()
 
 	// Create application directory hyperlink
 	appDirLink = widget.NewHyperlink("", nil)
@@ -84,7 +93,7 @@ func CreateTab(w fyne.Window, _ fyne.App) *fyne.Container {
 	// Initialize containers
 	downloadContainer = container.NewVBox()
 	versionContainer = container.NewStack()
-	stopContainer = container.NewVBox(widget.NewSeparator(), stopButton, statusLabel, urlLink, appDirLink, tailLogLink)
+	stopContainer = container.NewVBox(widget.NewSeparator(), stopButton, statusRow, trackerConnectionRow, appDirLink, tailLogLink)
 
 	// Initialize download titles
 	updateTitle = widget.NewRichTextFromMarkdown("")
@@ -773,6 +782,7 @@ func restoreOwlcmsRunningUI(version, port string, pid int) {
 	urlLink.SetURLFromString(url)
 	urlLink.SetText("Open OWLCMS in a browser")
 	urlLink.Show()
+	configureTrackerConnectionUI(version)
 
 	appDir := filepath.Join(installDir, version)
 	appDirLink.SetText(fmt.Sprintf("Open OWLCMS %s directory", version))
@@ -784,6 +794,34 @@ func restoreOwlcmsRunningUI(version, port string, pid int) {
 	configureTailLogLink(version, appDir)
 	hideStartupLogArea()
 	stopContainer.Refresh()
+}
+
+func configureTrackerConnectionUI(version string) {
+	connectionURL := GetTrackerConnectionURLForRelease(version)
+	if connectionURL == "" {
+		trackerConnectionRow.Hide()
+		return
+	}
+	trackerConnectionLabel.SetText(fmt.Sprintf("Connecting to tracker %s  ", connectionURL))
+
+	browserURL, err := url.Parse(connectionURL)
+	if err != nil {
+		trackerConnectionRow.Hide()
+		return
+	}
+	switch browserURL.Scheme {
+	case "ws":
+		browserURL.Scheme = "http"
+	case "wss":
+		browserURL.Scheme = "https"
+	default:
+		trackerConnectionRow.Hide()
+		return
+	}
+	browserURL.Path = ""
+	trackerURLLink.SetURL(browserURL)
+	trackerURLLink.SetText("Open Tracker in a browser")
+	trackerConnectionRow.Show()
 }
 
 func reconnectOwlcmsRuntime() bool {

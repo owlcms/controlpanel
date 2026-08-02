@@ -115,6 +115,9 @@ func TestGetTrackerConnectionPortForReleaseReadsStoredURL(t *testing.T) {
 	if got := GetTrackerConnectionPortForRelease("65.0.0"); got != "18123" {
 		t.Fatalf("expected tracker port 18123, got %q", got)
 	}
+	if got := GetTrackerConnectionURLForRelease("65.0.0"); got != "ws://127.0.0.1:18123/ws" {
+		t.Fatalf("expected tracker URL ws://127.0.0.1:18123/ws, got %q", got)
+	}
 	if !GetTrackerConnectionEnabledForRelease("65.0.0") {
 		t.Fatal("expected tracker connection to be enabled for release")
 	}

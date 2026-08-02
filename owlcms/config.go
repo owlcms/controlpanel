@@ -230,17 +230,24 @@ func loadReleaseProperties(releaseVersion string) (*properties.Properties, error
 // GetTrackerConnectionPortForRelease returns the configured local tracker port
 // from OWLCMS_VIDEODATA for the selected release, or empty when disabled.
 func GetTrackerConnectionPortForRelease(releaseVersion string) string {
+	connectionURL := GetTrackerConnectionURLForRelease(releaseVersion)
+	port, ok := trackerConnectionPort(connectionURL)
+	if !ok {
+		return ""
+	}
+	return port
+}
+
+// GetTrackerConnectionURLForRelease returns the effective tracker WebSocket URL
+// configured for a selected OWLCMS release, or an empty string when disabled.
+func GetTrackerConnectionURLForRelease(releaseVersion string) string {
 	releaseProps, err := loadReleaseProperties(releaseVersion)
 	if err == nil && releaseProps != nil {
 		if value, ok := releaseProps.Get(trackerConnectionEnv); ok {
-			if strings.TrimSpace(value) == "" {
+			if _, _, valid := trackerConnectionSettings(value); !valid {
 				return ""
 			}
-			port, ok := trackerConnectionPort(value)
-			if !ok {
-				return ""
-			}
-			return port
+			return strings.TrimSpace(value)
 		}
 	}
 
@@ -252,11 +259,10 @@ func GetTrackerConnectionPortForRelease(releaseVersion string) string {
 	if !ok {
 		return ""
 	}
-	port, ok := trackerConnectionPort(value)
-	if !ok {
+	if _, _, valid := trackerConnectionSettings(value); !valid {
 		return ""
 	}
-	return port
+	return strings.TrimSpace(value)
 }
 
 func loadPropertiesFromFile(envFilePath string) (*properties.Properties, error) {
