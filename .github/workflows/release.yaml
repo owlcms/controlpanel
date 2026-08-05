@@ -395,7 +395,7 @@ jobs:
       run: |
         fpm -s tar -t deb -n owlcms-launcher -v "${DEB_TAG}" -a amd64 --prefix / \
           --after-install ./dist/after_install_amd64.sh \
-          --after-remove ./dist/after_remove.sh \
+          --after-remove ./dist/after_remove_amd64.sh \
           ./owlcms.tar.xz
         mkdir -p artifacts
         mv "owlcms-launcher_${DEB_TAG}_amd64.deb" artifacts/Linux_Control_Panel_Installer.deb
@@ -488,8 +488,8 @@ jobs:
       if: ${{ env.BUILD_RASPBERRY == 'true' }}
       run: |
         fpm -s tar -t deb -n owlcms-launcher -v "${DEB_TAG}" -a arm64 --prefix / \
-          --after-install ./dist/after_install.sh \
-          --after-remove ./dist/after_remove.sh \
+          --after-install ./dist/after_install_raspberry_pi.sh \
+          --after-remove ./dist/after_remove_raspberry_pi.sh \
           ./owlcms.tar.xz
         mkdir -p artifacts
         mv "owlcms-launcher_${DEB_TAG}_arm64.deb" artifacts/Raspberry_Pi_arm64_Control_Panel_Installer.deb

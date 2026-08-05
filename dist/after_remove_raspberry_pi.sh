@@ -1,11 +1,17 @@
 #!/bin/bash
 
+# Only on real removal: on upgrade the new postinst rewrites this anyway.
+if [[ "$1" != "upgrade" ]]; then
+  rm -f /etc/sysctl.d/50-owlcms.conf
+  sysctl --system >/dev/null 2>&1 || true
+fi
+
 if [[ -n "$SUDO_USER" ]]; then
   target_user="$SUDO_USER"
 elif [[ -n "$PACKAGEKIT_CALLER_UID" ]]; then
   target_user=$(getent passwd "$PACKAGEKIT_CALLER_UID" | cut -d: -f1)
 else
-  echo "No user found to create the desktop file" > /tmp/owlcms.log
+  echo "No user found to remove the desktop file" > /tmp/owlcms.log
   printenv >> /tmp/owlcms.log
   exit 0
 fi
@@ -16,17 +22,4 @@ if [[ -z "$desktop_dir" ]]; then
   desktop_dir="$user_home/Desktop"
 fi
 
-mkdir -p "$desktop_dir"
-shortcut_path="$desktop_dir/owlcms.desktop"
-
-cat > "$shortcut_path" <<EOF
-[Desktop Entry]
-Type=Application
-Name=owlcms
-Exec=controlpanel
-Icon=owlcms
-Terminal=false
-EOF
-
-chmod +x "$shortcut_path"
-
+rm -f "$desktop_dir/owlcms.desktop"
