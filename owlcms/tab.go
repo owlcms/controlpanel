@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -302,7 +303,7 @@ func createOptionsMenu(w fyne.Window) *widget.Button {
 		showTrackerConnectionDialog(w)
 	})
 
-	setPortItem := fyne.NewMenuItem("Default Port Number", func() {
+	setPortItem := fyne.NewMenuItem("Default Host Name and Port Number", func() {
 		showPortNumberDialog(w)
 	})
 	trackerToggleItem.Label = "Default Tracker Connection"
@@ -551,21 +552,26 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 }
 
 func showPortNumberDialog(w fyne.Window) {
+	mdnsHostNameEntry := widget.NewEntry()
+	mdnsHostNameEntry.SetText(GetMdnsHostName())
+	mdnsHostNameInput := container.NewGridWrap(fyne.NewSize(fyne.MeasureText(strings.Repeat("M", 10), theme.TextSize(), fyne.TextStyle{}).Width, mdnsHostNameEntry.MinSize().Height), mdnsHostNameEntry)
 	portEntry := widget.NewEntry()
 	portEntry.SetPlaceHolder("8080")
 	portEntry.SetText(GetPort())
+	portInput := container.NewGridWrap(mdnsHostNameInput.MinSize(), portEntry)
 	portStatusLabel := widget.NewLabel("Selected port will apply to future installs. To change the port on an already installed version, use the Option menu for that version.")
 	portStatusLabel.Wrapping = fyne.TextWrapWord
 
 	content := container.NewVBox(
 		widget.NewForm(
-			widget.NewFormItem("Port Number", portEntry),
+			widget.NewFormItem("Default .local Host Name", container.NewHBox(mdnsHostNameInput, widget.NewLabel(".local"))),
+			widget.NewFormItem("Port Number", portInput),
 		),
 		portStatusLabel,
 	)
 
 	d := dialog.NewCustomConfirm(
-		"Default Port Number",
+		"Default Host Name and Port Number",
 		"Save",
 		"Cancel",
 		content,
@@ -574,6 +580,7 @@ func showPortNumberDialog(w fyne.Window) {
 				return
 			}
 
+			mdnsHostName := strings.TrimSpace(mdnsHostNameEntry.Text)
 			newPort := strings.TrimSpace(portEntry.Text)
 			if newPort == "" {
 				dialog.ShowError(fmt.Errorf("port number is required"), w)
@@ -586,6 +593,10 @@ func showPortNumberDialog(w fyne.Window) {
 				return
 			}
 
+			if err := SaveProperty(mdnsEnv, mdnsHostName); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to save mDNS host name: %w", err), w)
+				return
+			}
 			if err := SaveProperty("OWLCMS_PORT", newPort); err != nil {
 				dialog.ShowError(fmt.Errorf("failed to save OWLCMS port: %w", err), w)
 				return
@@ -593,7 +604,7 @@ func showPortNumberDialog(w fyne.Window) {
 		},
 		w,
 	)
-	d.Resize(fyne.NewSize(520, 200))
+	d.Resize(fyne.NewSize(520, 240))
 	d.Show()
 }
 

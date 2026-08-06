@@ -7,6 +7,26 @@ import (
 	"testing"
 )
 
+func TestGetMdnsHostNameDefaultsAndPreservesDisableValue(t *testing.T) {
+	installDir := t.TempDir()
+	previousDir := GetInstallDir()
+	SetInstallDir(installDir)
+	t.Cleanup(func() {
+		SetInstallDir(previousDir)
+	})
+
+	if got := GetMdnsHostName(); got != "owlcms" {
+		t.Fatalf("expected default mDNS host name owlcms, got %q", got)
+	}
+
+	if err := SaveProperty("OWLCMS_MDNS", ""); err != nil {
+		t.Fatalf("save disabled mDNS value: %v", err)
+	}
+	if got := GetMdnsHostName(); got != "" {
+		t.Fatalf("expected blank mDNS value to remain blank, got %q", got)
+	}
+}
+
 func TestGetPortForReleaseUsesLocalPort(t *testing.T) {
 	t.Setenv("OWLCMS_PORT", "19090")
 	t.Setenv("CONTROLPANEL_RUN_AS_DAEMON", "true")

@@ -30,7 +30,7 @@ The control panel is installed once. It will automatically download the correct 
   - the global default is kept unless explicitly overridden (previously the global was always hidden)
   - added capability to reach an external tracker without having to change the database
 
-### 3.4.0-
+### 3.4.0
 
 - Fixed the update behavior for the camera and replay modules available for Windows and Linux.
 - AppleSilicon (M-Series) dmg available; separate dmg for Intel Macs

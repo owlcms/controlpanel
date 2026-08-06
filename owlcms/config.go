@@ -27,6 +27,7 @@ var (
 )
 
 const (
+	mdnsEnv                            = "OWLCMS_MDNS"
 	trackerConnectionEnv               = "OWLCMS_VIDEODATA"
 	trackerConnectionURLSetting        = "CONTROLPANEL_TRACKER_URL"
 	trackerConnectionPortSetting       = "CONTROLPANEL_TRACKER_PORT"
@@ -34,6 +35,7 @@ const (
 )
 
 const (
+	defaultMdnsHostName          = "owlcms"
 	defaultTrackerConnectionURL  = "ws://localhost/ws"
 	defaultTrackerConnectionPort = "8096"
 )
@@ -57,6 +59,21 @@ func GetLauncherVersion() string {
 // GetPort returns the configured port from env.properties, defaulting to "8080"
 func GetPort() string {
 	return getPortFromProperties(environment)
+}
+
+// GetMdnsHostName returns the configured mDNS host name, or the default when it has not been set.
+// An explicitly blank value is preserved to disable the mDNS advertisement.
+func GetMdnsHostName() string {
+	if environment == nil {
+		return defaultMdnsHostName
+	}
+
+	value, ok := environment.Get(mdnsEnv)
+	if !ok {
+		return defaultMdnsHostName
+	}
+
+	return strings.TrimSpace(value)
 }
 
 // GetTemurinVersion returns the configured Temurin version from env.properties
