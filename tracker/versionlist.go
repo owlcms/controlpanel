@@ -162,6 +162,7 @@ func createVersionList(w fyne.Window, stopBtn *widget.Button) *widget.List {
 			buttonContainer.RemoveAll()
 
 			createLaunchButton(w, version, stopBtn, buttonContainer)
+			createVersionOptionsButton(w, version, buttonContainer)
 			createFilesButton(version, w, buttonContainer)
 			if len(allReleases) > 0 {
 				createUpdateButton(version, w, buttonContainer)
@@ -201,6 +202,16 @@ func createVersionList(w fyne.Window, stopBtn *widget.Button) *widget.List {
 	}
 
 	return versionList
+}
+
+func createVersionOptionsButton(w fyne.Window, version string, buttonContainer *fyne.Container) {
+	menuItems := []*fyne.MenuItem{
+		fyne.NewMenuItem("Port Number", func() {
+			showPortNumberDialogForVersion(w, version)
+		}),
+	}
+
+	buttonContainer.Add(container.NewPadded(shared.CreateMenuButton("Options", menuItems)))
 }
 
 func createImportButton(versions []string, version string, w fyne.Window, buttonContainer *fyne.Container) {
@@ -582,9 +593,7 @@ func recomputeVersionList(w fyne.Window) {
 	center := container.NewStack(versionScroll)
 
 	if numVersions == 0 {
-		// Reset the tab to explanation mode (clears download UI then shows explanation)
-		resetToExplainMode()
-		// No version list to add — return early
+		setTrackerTabModeUninstalled(w)
 		return
 	} else {
 		versionScroll.Show()

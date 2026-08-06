@@ -157,6 +157,8 @@ func CreateTab(w fyne.Window, _ fyne.App) *fyne.Container {
 	// Add small spacer under the menu bar to increase top area
 	topSpacer := canvas.NewRectangle(color.Transparent)
 	topSpacer.SetMinSize(fyne.NewSize(1, 8))
+	installTopSpacer := canvas.NewRectangle(color.Transparent)
+	installTopSpacer.SetMinSize(fyne.NewSize(1, 8))
 
 	// Two different layouts:
 	// - Selection mode: version list (center) + download section (bottom)
@@ -177,7 +179,7 @@ func CreateTab(w fyne.Window, _ fyne.App) *fyne.Container {
 
 	modeStack = container.NewStack(selectionContent, runningContent)
 
-	topInstallContent = container.NewVBox()
+	topInstallContent = container.NewVBox(createInstallMenuBar(w), installTopSpacer)
 	topVersionContent = container.NewVBox(menuBar, topSpacer)
 	topRunContent = container.NewVBox(stopContainer)
 	topModeStack = container.NewStack(topInstallContent, topVersionContent, topRunContent)
@@ -295,6 +297,42 @@ func setOwlcmsTabModeRunning() {
 	}
 }
 
+func createOptionsMenu(w fyne.Window) *widget.Button {
+	trackerToggleItem := fyne.NewMenuItem("Local Tracker Connection", func() {
+		showTrackerConnectionDialog(w)
+	})
+
+	setPortItem := fyne.NewMenuItem("Default Port Number", func() {
+		showPortNumberDialog(w)
+	})
+	trackerToggleItem.Label = "Default Tracker Connection"
+
+	return shared.CreateMenuButton("Options", []*fyne.MenuItem{setPortItem, trackerToggleItem})
+}
+
+func installVersionFromZip(w fyne.Window) {
+	selectLocalZip(w, func(path string, err error) {
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("file selection failed: %w", err), w)
+			return
+		}
+		if path == "" {
+			return
+		}
+		installutils.ProcessLocalZipFile(path, w, installDir, copyFile, updateExplanation, recomputeVersionList, checkForNewerVersion)
+	})
+}
+
+func createInstallMenuBar(w fyne.Window) *fyne.Container {
+	fileMenu := shared.CreateMenuButton("Files", []*fyne.MenuItem{
+		fyne.NewMenuItem("Install OWLCMS version from ZIP", func() {
+			installVersionFromZip(w)
+		}),
+	})
+
+	return container.NewHBox(fileMenu, createOptionsMenu(w))
+}
+
 // createMenuBar creates the menu bar with File, Processes, and Options menus
 func createMenuBar(w fyne.Window) *fyne.Container {
 	// Create the File menu button with popup
@@ -308,16 +346,7 @@ func createMenuBar(w fyne.Window) *fyne.Container {
 			refreshAvailableVersions(w)
 		}),
 		fyne.NewMenuItem("Install OWLCMS version from ZIP", func() {
-			selectLocalZip(w, func(path string, err error) {
-				if err != nil {
-					dialog.ShowError(fmt.Errorf("file selection failed: %w", err), w)
-					return
-				}
-				if path == "" {
-					return
-				}
-				installutils.ProcessLocalZipFile(path, w, installDir, copyFile, updateExplanation, recomputeVersionList, checkForNewerVersion)
-			})
+			installVersionFromZip(w)
 		}),
 		fyne.NewMenuItem("Save installed OWLCMS version as ZIP", func() {
 			installutils.ZipCurrentSetup(w, installDir, getAllInstalledVersions, selectSaveZip)
@@ -349,19 +378,7 @@ func createMenuBar(w fyne.Window) *fyne.Container {
 	}
 	processMenu := shared.CreateMenuButton("Processes", processMenuItems)
 
-	// Create the Options menu button with popup
-	trackerToggleItem := fyne.NewMenuItem("Local Tracker Connection", func() {
-		showTrackerConnectionDialog(w)
-	})
-
-	setPortItem := fyne.NewMenuItem("Default Port Number", func() {
-		showPortNumberDialog(w)
-	})
-	trackerToggleItem.Label = "Default Tracker Connection"
-
-	optionsMenuItems := []*fyne.MenuItem{setPortItem, trackerToggleItem}
-
-	optionsMenu := shared.CreateMenuButton("Options", optionsMenuItems)
+	optionsMenu := createOptionsMenu(w)
 
 	// Add small vertical padding
 	spacer := canvas.NewRectangle(color.Transparent)
@@ -537,10 +554,8 @@ func showPortNumberDialog(w fyne.Window) {
 	portEntry := widget.NewEntry()
 	portEntry.SetPlaceHolder("8080")
 	portEntry.SetText(GetPort())
-	portStatusLabel := widget.NewLabel(fmt.Sprintf("By default, OWLCMS will use port %s.", portEntry.Text))
-	portEntry.OnChanged = func(_ string) {
-		portStatusLabel.SetText(fmt.Sprintf("By default, OWLCMS will use port %s.", portEntry.Text))
-	}
+	portStatusLabel := widget.NewLabel("Selected port will apply to future installs. To change the port on an already installed version, use the Option menu for that version.")
+	portStatusLabel.Wrapping = fyne.TextWrapWord
 
 	content := container.NewVBox(
 		widget.NewForm(
@@ -575,11 +590,10 @@ func showPortNumberDialog(w fyne.Window) {
 				dialog.ShowError(fmt.Errorf("failed to save OWLCMS port: %w", err), w)
 				return
 			}
-
-			dialog.ShowInformation("Default Port Updated", fmt.Sprintf("Default OWLCMS port set to %s. Restart OWLCMS to apply the new port.", newPort), w)
 		},
 		w,
 	)
+	d.Resize(fyne.NewSize(520, 200))
 	d.Show()
 }
 

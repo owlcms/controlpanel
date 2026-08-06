@@ -266,6 +266,13 @@ func InstallLocalZipFile(zipPath, version string, w fyne.Window, trackerInstallD
 				})
 				return
 			}
+			if err := EnsureReleaseEnvFromParent(finalVersionName); err != nil {
+				fyne.Do(func() {
+					progressDialog.Hide()
+					dialog.ShowError(fmt.Errorf("creating release env.properties: %w", err), w)
+				})
+				return
+			}
 
 			fyne.Do(func() {
 				progressBar.SetValue(1.0)

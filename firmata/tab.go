@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	customdialog "controlpanel/firmata/dialog"
 	"controlpanel/firmata/javacheck"
@@ -197,6 +199,10 @@ func CreateTab(w fyne.Window) *fyne.Container {
 	// Initialize the firmata-specific components
 	initMain()
 	initConfig()
+	if err := InitEnv(); err != nil {
+		log.Printf("Failed to initialize Firmata environment: %v", err)
+		dialog.ShowError(fmt.Errorf("failed to initialize Firmata environment: %w", err), w)
+	}
 
 	// Store main window reference
 	mainWindow = w
@@ -264,6 +270,8 @@ func CreateTab(w fyne.Window) *fyne.Container {
 	menuBar := createMenuBar(w)
 	topSpacer := canvas.NewRectangle(color.Transparent)
 	topSpacer.SetMinSize(fyne.NewSize(1, 8))
+	installTopSpacer := canvas.NewRectangle(color.Transparent)
+	installTopSpacer.SetMinSize(fyne.NewSize(1, 8))
 
 	// Two different layouts:
 	// - Selection mode: version list (center) + download section (bottom)
@@ -284,7 +292,7 @@ func CreateTab(w fyne.Window) *fyne.Container {
 
 	modeStack = container.NewStack(selectionContent, runningContent)
 
-	topInstallContent = container.NewVBox()
+	topInstallContent = container.NewVBox(createOptionsMenu(w), installTopSpacer)
 	topVersionContent = container.NewVBox(menuBar, topSpacer)
 	topRunContent = container.NewVBox(stopContainer)
 	topModeStack = container.NewStack(topInstallContent, topVersionContent, topRunContent)
@@ -406,6 +414,93 @@ func setFirmataTabModeRunning() {
 	}
 }
 
+func createOptionsMenu(w fyne.Window) *widget.Button {
+	setPortItem := fyne.NewMenuItem("Default Port Number", func() {
+		showDefaultPortDialog(w)
+	})
+	return shared.CreateMenuButton("Options", []*fyne.MenuItem{setPortItem})
+}
+
+func showDefaultPortDialog(w fyne.Window) {
+	portEntry := widget.NewEntry()
+	portEntry.SetPlaceHolder("8090")
+	portEntry.SetText(GetPort())
+	portStatusLabel := widget.NewLabel("Selected port will apply to future installs. To change the port on an already installed version, use the Option menu for that version.")
+	portStatusLabel.Wrapping = fyne.TextWrapWord
+	content := container.NewVBox(
+		widget.NewForm(widget.NewFormItem("Port Number", portEntry)),
+		portStatusLabel,
+	)
+
+	d := dialog.NewCustomConfirm(
+		"Default Firmata Port Number",
+		"Save",
+		"Cancel",
+		content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+
+			newPort := strings.TrimSpace(portEntry.Text)
+			portNumber, err := strconv.Atoi(newPort)
+			if newPort == "" || err != nil || portNumber < 1 || portNumber > 65535 {
+				dialog.ShowError(fmt.Errorf("port number must be an integer between 1 and 65535"), w)
+				return
+			}
+
+			if err := SaveProperty("FIRMATA_PORT", newPort); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to save Firmata port: %w", err), w)
+				return
+			}
+		},
+		w,
+	)
+	d.Resize(fyne.NewSize(520, 200))
+	d.Show()
+}
+
+func showPortNumberDialogForVersion(w fyne.Window, version string) {
+	portEntry := widget.NewEntry()
+	portEntry.SetPlaceHolder("8090")
+	portEntry.SetText(GetPortForRelease(version))
+	portStatusLabel := widget.NewLabel(fmt.Sprintf("Version %s will use port %s.", version, portEntry.Text))
+	portEntry.OnChanged = func(_ string) {
+		portStatusLabel.SetText(fmt.Sprintf("Version %s will use port %s.", version, portEntry.Text))
+	}
+
+	content := container.NewVBox(
+		widget.NewForm(widget.NewFormItem("Port Number", portEntry)),
+		portStatusLabel,
+	)
+	d := dialog.NewCustomConfirm(
+		"Firmata Port Number",
+		"Save",
+		"Cancel",
+		content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+
+			newPort := strings.TrimSpace(portEntry.Text)
+			portNumber, err := strconv.Atoi(newPort)
+			if newPort == "" || err != nil || portNumber < 1 || portNumber > 65535 {
+				dialog.ShowError(fmt.Errorf("port number must be an integer between 1 and 65535"), w)
+				return
+			}
+			if err := SavePropertyForRelease(version, "FIRMATA_PORT", newPort); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to save Firmata port: %w", err), w)
+				return
+			}
+
+			dialog.ShowInformation("Firmata Port Updated", fmt.Sprintf("Firmata port for version %s set to %s. Restart Firmata for that version to apply the new port.", version, newPort), w)
+		},
+		w,
+	)
+	d.Show()
+}
+
 // createMenuBar creates the menu bar with File and Processes menus
 func createMenuBar(w fyne.Window) *fyne.Container {
 	// Create the File menu button with popup
@@ -444,6 +539,7 @@ func createMenuBar(w fyne.Window) *fyne.Container {
 		}),
 	}
 	processMenu := shared.CreateMenuButton("Processes", processMenuItems)
+	optionsMenu := createOptionsMenu(w)
 
 	// Add small vertical padding
 	spacer := canvas.NewRectangle(color.Transparent)
@@ -451,7 +547,7 @@ func createMenuBar(w fyne.Window) *fyne.Container {
 
 	return container.NewVBox(
 		spacer,
-		container.NewHBox(fileMenu, processMenu),
+		container.NewHBox(fileMenu, processMenu, optionsMenu),
 	)
 }
 
@@ -641,6 +737,13 @@ func downloadAndInstallVersion(version string, w fyne.Window) {
 				progressDialog.Hide()
 				customdialog.ShowWideError(fmt.Errorf("installation completed but failed to create configuration file: %w\n\nYou may need to check permissions on the installation directory", err), w)
 				setFirmataTabMode(w)
+			})
+			return
+		}
+		if err := EnsureReleaseEnvFromParent(version); err != nil {
+			fyne.Do(func() {
+				progressDialog.Hide()
+				customdialog.ShowWideError(fmt.Errorf("installation completed but failed to create release configuration: %w", err), w)
 			})
 			return
 		}

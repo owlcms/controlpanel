@@ -103,6 +103,10 @@ func InstallRelease(downloadVersion, installVersion string, downloadProgress, ex
 		_ = os.RemoveAll(extractPath)
 		return ActionResult{}, fmt.Errorf("extraction failed: %w", err)
 	}
+	if err := EnsureReleaseEnvFromParent(installVersion); err != nil {
+		_ = os.RemoveAll(extractPath)
+		return ActionResult{}, fmt.Errorf("creating release env.properties: %w", err)
+	}
 
 	return ActionResult{Version: installVersion, Path: extractPath}, nil
 }

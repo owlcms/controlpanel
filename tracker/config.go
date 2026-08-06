@@ -115,6 +115,13 @@ func SaveProperty(key, value string) error {
 			return fmt.Errorf("failed to initialize environment: %w", err)
 		}
 	}
+	if key == "TRACKER_PORT" {
+		for _, releaseVersion := range getAllInstalledVersions() {
+			if err := EnsureReleaseEnvFromParent(releaseVersion); err != nil {
+				return fmt.Errorf("preserving configuration for version %s: %w", releaseVersion, err)
+			}
+		}
+	}
 
 	environment.Set(key, value)
 
@@ -132,6 +139,43 @@ func SaveProperty(key, value string) error {
 	return nil
 }
 
+// EnsureReleaseEnvFromParent snapshots shared settings for a newly installed release.
+func EnsureReleaseEnvFromParent(releaseVersion string) error {
+	releaseVersion = strings.TrimSpace(releaseVersion)
+	if releaseVersion == "" {
+		return fmt.Errorf("release version is required")
+	}
+	if err := InitEnv(); err != nil {
+		return fmt.Errorf("initializing shared environment: %w", err)
+	}
+
+	releaseEnvPath := filepath.Join(installDir, releaseVersion, "env.properties")
+	if _, err := os.Stat(releaseEnvPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking %s: %w", releaseEnvPath, err)
+	}
+	if err := shared.EnsureDir0755(filepath.Dir(releaseEnvPath)); err != nil {
+		return fmt.Errorf("creating release env directory: %w", err)
+	}
+
+	props := properties.NewProperties()
+	for _, propKey := range environment.Keys() {
+		propValue, _ := environment.Get(propKey)
+		props.Set(propKey, propValue)
+	}
+	file, err := os.Create(releaseEnvPath)
+	if err != nil {
+		return fmt.Errorf("creating release env.properties: %w", err)
+	}
+	defer file.Close()
+	if _, err := props.Write(file, properties.UTF8); err != nil {
+		return fmt.Errorf("writing release env.properties: %w", err)
+	}
+
+	return nil
+}
+
 // SavePropertyForRelease saves a key-value pair to a version-specific env.properties file.
 func SavePropertyForRelease(releaseVersion, key, value string) error {
 	releaseVersion = strings.TrimSpace(releaseVersion)
@@ -140,9 +184,6 @@ func SavePropertyForRelease(releaseVersion, key, value string) error {
 	}
 
 	releaseEnvPath := filepath.Join(installDir, releaseVersion, "env.properties")
-	if err := shared.EnsureDir0755(filepath.Dir(releaseEnvPath)); err != nil {
-		return fmt.Errorf("creating release env directory: %w", err)
-	}
 
 	props := properties.NewProperties()
 	if _, err := os.Stat(releaseEnvPath); err == nil {
@@ -152,15 +193,14 @@ func SavePropertyForRelease(releaseVersion, key, value string) error {
 		}
 		props = loaded
 	} else if os.IsNotExist(err) {
-		if environment == nil {
-			if err := InitEnv(); err != nil {
-				return fmt.Errorf("failed to initialize environment: %w", err)
-			}
+		if err := EnsureReleaseEnvFromParent(releaseVersion); err != nil {
+			return err
 		}
-		for _, propKey := range environment.Keys() {
-			propValue, _ := environment.Get(propKey)
-			props.Set(propKey, propValue)
+		loaded, err := properties.LoadFile(releaseEnvPath, properties.UTF8)
+		if err != nil {
+			return fmt.Errorf("loading %s: %w", releaseEnvPath, err)
 		}
+		props = loaded
 	} else {
 		return fmt.Errorf("checking %s: %w", releaseEnvPath, err)
 	}

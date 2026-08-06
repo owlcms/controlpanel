@@ -123,6 +123,96 @@ func EnsureEnvWithDialog(w fyne.Window) bool {
 	return true
 }
 
+// SaveProperty persists a shared Firmata setting in the parent env.properties file.
+func SaveProperty(key, value string) error {
+	if err := InitEnv(); err != nil {
+		return fmt.Errorf("failed to initialize environment: %w", err)
+	}
+	if key == "FIRMATA_PORT" {
+		for _, releaseVersion := range getAllInstalledVersions() {
+			if err := EnsureReleaseEnvFromParent(releaseVersion); err != nil {
+				return fmt.Errorf("preserving configuration for version %s: %w", releaseVersion, err)
+			}
+		}
+	}
+
+	environment.Set(key, value)
+	envFilePath := filepath.Join(installDir, "env.properties")
+	file, err := os.Create(envFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open env.properties for writing: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := environment.Write(file, properties.UTF8); err != nil {
+		return fmt.Errorf("failed to write env.properties: %w", err)
+	}
+
+	log.Printf("Saved property %s = %s to %s", key, value, envFilePath)
+	return nil
+}
+
+// EnsureReleaseEnvFromParent snapshots shared settings for a newly installed release.
+func EnsureReleaseEnvFromParent(releaseVersion string) error {
+	releaseVersion = strings.TrimSpace(releaseVersion)
+	if releaseVersion == "" {
+		return fmt.Errorf("release version is required")
+	}
+	if err := InitEnv(); err != nil {
+		return fmt.Errorf("initializing shared environment: %w", err)
+	}
+
+	releaseEnvPath := filepath.Join(installDir, releaseVersion, "env.properties")
+	if _, err := os.Stat(releaseEnvPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking %s: %w", releaseEnvPath, err)
+	}
+	if err := shared.EnsureDir0755(filepath.Dir(releaseEnvPath)); err != nil {
+		return fmt.Errorf("creating release env directory: %w", err)
+	}
+
+	props := properties.NewProperties()
+	for _, propKey := range environment.Keys() {
+		propValue, _ := environment.Get(propKey)
+		props.Set(propKey, propValue)
+	}
+	file, err := os.Create(releaseEnvPath)
+	if err != nil {
+		return fmt.Errorf("creating release env.properties: %w", err)
+	}
+	defer file.Close()
+	if _, err := props.Write(file, properties.UTF8); err != nil {
+		return fmt.Errorf("writing release env.properties: %w", err)
+	}
+
+	return nil
+}
+
+// SavePropertyForRelease saves a key-value pair in a release-specific env.properties file.
+func SavePropertyForRelease(releaseVersion, key, value string) error {
+	if err := EnsureReleaseEnvFromParent(releaseVersion); err != nil {
+		return err
+	}
+
+	releaseEnvPath := filepath.Join(installDir, strings.TrimSpace(releaseVersion), "env.properties")
+	props, err := properties.LoadFile(releaseEnvPath, properties.UTF8)
+	if err != nil {
+		return fmt.Errorf("loading %s: %w", releaseEnvPath, err)
+	}
+	props.Set(key, value)
+	file, err := os.Create(releaseEnvPath)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", releaseEnvPath, err)
+	}
+	defer file.Close()
+	if _, err := props.Write(file, properties.UTF8); err != nil {
+		return fmt.Errorf("writing %s: %w", releaseEnvPath, err)
+	}
+
+	return nil
+}
+
 // InitEnv initializes the environment properties from env.properties file
 func InitEnv() error {
 	log.Println("Initializing environment properties")
@@ -131,6 +221,9 @@ func InitEnv() error {
 	envFilePath := filepath.Join(installDir, "env.properties")
 	if _, err := os.Stat(envFilePath); os.IsNotExist(err) {
 		// Create env.properties file with entry "FIRMATA_PORT=8090"
+		if err := shared.EnsureDir0755(installDir); err != nil {
+			return fmt.Errorf("failed to create Firmata installation directory: %w", err)
+		}
 		props.Set("FIRMATA_PORT", "8090")
 		props.Set("TEMURIN_VERSION", "jdk-25")
 		file, err := os.Create(envFilePath)

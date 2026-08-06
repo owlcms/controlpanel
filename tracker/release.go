@@ -227,8 +227,10 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 
 	runInstall := func() {
 		if w != nil {
-			messageLabel.SetText(fmt.Sprintf("Downloading Tracker %s...", downloadVersion))
-			messageLabel.Refresh()
+			fyne.Do(func() {
+				messageLabel.SetText(fmt.Sprintf("Downloading Tracker %s...", downloadVersion))
+				messageLabel.Refresh()
+			})
 		} else {
 			log.Printf("Downloading Tracker %s...\n", downloadVersion)
 			fmt.Printf("Downloading Tracker %s...\n", downloadVersion)
@@ -238,7 +240,9 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 			if total > 0 {
 				progress := float64(downloaded) / float64(total)
 				if w != nil {
-					progressBar.SetValue(progress)
+					fyne.Do(func() {
+						progressBar.SetValue(progress)
+					})
 				} else {
 					log.Printf("Downloading Tracker %s... %.1f%%", downloadVersion, progress*100)
 					fmt.Printf("\rDownloading Tracker %s... %.1f%%", downloadVersion, progress*100)
@@ -247,8 +251,10 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 		}
 
 		if w != nil {
-			messageLabel.SetText("Extracting files...")
-			messageLabel.Refresh()
+			fyne.Do(func() {
+				messageLabel.SetText("Extracting files...")
+				messageLabel.Refresh()
+			})
 		} else {
 			log.Println("\nExtracting files...")
 			fmt.Println("Extracting files...")
@@ -257,7 +263,9 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 		extractProgress := func(extracted, total int64) {
 			if total > 0 {
 				if w != nil {
-					progressBar.SetValue(float64(extracted) / float64(total))
+					fyne.Do(func() {
+						progressBar.SetValue(float64(extracted) / float64(total))
+					})
 				} else {
 					log.Printf("Extracted: %d/%d bytes", extracted, total)
 				}
@@ -266,8 +274,10 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 		result, err := InstallRelease(downloadVersion, installVersion, progressCallback, extractProgress)
 		if err != nil {
 			if w != nil {
-				progressDialog.Hide()
-				dialog.ShowError(err, w)
+				fyne.Do(func() {
+					progressDialog.Hide()
+					dialog.ShowError(err, w)
+				})
 			} else {
 				log.Printf("Error: %v", err)
 			}
@@ -275,17 +285,11 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 		}
 
 		if w != nil {
-			progressBar.SetValue(1.0)
+			fyne.Do(func() {
+				progressBar.SetValue(1.0)
+			})
 		}
 		log.Println("Extraction completed")
-
-		if w != nil {
-			// Ensure the tab UI is initialized so download UI widgets exist
-			initializeTab(w)
-			updateExplanation()
-
-			progressDialog.Hide()
-		}
 
 		message := fmt.Sprintf(
 			"Successfully installed Tracker version %s\n\n"+
@@ -294,12 +298,15 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 			result.Version, result.Path)
 
 		if w != nil {
-			dialog.ShowInformation("Installation Complete", message, w)
-			HideDownloadables()
+			fyne.Do(func() {
+				progressDialog.Hide()
+				HideDownloadables()
+				setTrackerTabMode(w)
+				dialog.ShowInformation("Installation Complete", message, w)
+			})
+		}
 
-			recomputeVersionList(w)
-			checkForNewerVersion()
-		} else {
+		if w == nil {
 			log.Println("Installation Complete:\n" + message)
 			fmt.Println("Installation Complete:\n" + message)
 		}

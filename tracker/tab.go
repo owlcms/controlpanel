@@ -119,6 +119,10 @@ func CreateTab(w fyne.Window) *fyne.Container {
 	mainWindow = w
 
 	log.Println("Creating Tracker tab content")
+	if err := InitEnv(); err != nil {
+		log.Printf("Failed to initialize Tracker environment: %v", err)
+		dialog.ShowError(fmt.Errorf("failed to initialize Tracker environment: %w", err), w)
+	}
 
 	// Create stop button and status label
 	stopButton = widget.NewButtonWithIcon("Stop", theme.CancelIcon(), nil)
@@ -181,8 +185,10 @@ func CreateTab(w fyne.Window) *fyne.Container {
 	// Add small spacer under the menu bar to increase top area
 	topSpacer := canvas.NewRectangle(color.Transparent)
 	topSpacer.SetMinSize(fyne.NewSize(1, 8))
+	installTopSpacer := canvas.NewRectangle(color.Transparent)
+	installTopSpacer.SetMinSize(fyne.NewSize(1, 8))
 
-	topInstallContent = container.NewVBox()
+	topInstallContent = container.NewVBox(createInstallMenuBar(w), installTopSpacer)
 	topVersionContent = container.NewVBox(menuBar, topSpacer)
 	topRunContent = container.NewVBox(stopContainer)
 	topModeStack = container.NewStack(topInstallContent, topVersionContent, topRunContent)
@@ -280,6 +286,36 @@ func setTrackerTabModeRunning() {
 	}
 }
 
+func createOptionsMenu(w fyne.Window) *widget.Button {
+	setPortItem := fyne.NewMenuItem("Default Tracker Port", func() {
+		showPortNumberDialog(w)
+	})
+	return shared.CreateMenuButton("Options", []*fyne.MenuItem{setPortItem})
+}
+
+func installVersionFromZip(w fyne.Window) {
+	selectLocalZip(w, func(path string, err error) {
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("file selection failed: %w", err), w)
+			return
+		}
+		if path == "" {
+			return
+		}
+		ProcessLocalZipFile(path, w, installDir, updateExplanation, recomputeVersionList, checkForNewerVersion)
+	})
+}
+
+func createInstallMenuBar(w fyne.Window) *fyne.Container {
+	fileMenu := shared.CreateMenuButton("Files", []*fyne.MenuItem{
+		fyne.NewMenuItem("Install Tracker version from ZIP", func() {
+			installVersionFromZip(w)
+		}),
+	})
+
+	return container.NewHBox(fileMenu, createOptionsMenu(w))
+}
+
 // createMenuBar creates the menu bar with File and Processes menus
 func createMenuBar(w fyne.Window) *fyne.Container {
 	// Create the File menu button with popup
@@ -293,16 +329,7 @@ func createMenuBar(w fyne.Window) *fyne.Container {
 			refreshAvailableVersions(w)
 		}),
 		fyne.NewMenuItem("Install Tracker version from ZIP", func() {
-			selectLocalZip(w, func(path string, err error) {
-				if err != nil {
-					dialog.ShowError(fmt.Errorf("file selection failed: %w", err), w)
-					return
-				}
-				if path == "" {
-					return
-				}
-				ProcessLocalZipFile(path, w, installDir, updateExplanation, recomputeVersionList, checkForNewerVersion)
-			})
+			installVersionFromZip(w)
 		}),
 		fyne.NewMenuItem("Save installed Tracker version as ZIP", func() {
 			ZipCurrentSetup(w, installDir, getAllInstalledVersions, selectSaveZip)
@@ -330,12 +357,7 @@ func createMenuBar(w fyne.Window) *fyne.Container {
 	}
 	processMenu := shared.CreateMenuButton("Processes", processMenuItems)
 
-	// Create the Options menu button with popup
-	setPortItem := fyne.NewMenuItem("Port Number", func() {
-		showPortNumberDialog(w)
-	})
-	optionsMenuItems := []*fyne.MenuItem{setPortItem}
-	optionsMenu := shared.CreateMenuButton("Options", optionsMenuItems)
+	optionsMenu := createOptionsMenu(w)
 
 	// Add small vertical padding
 	spacer := canvas.NewRectangle(color.Transparent)
@@ -353,14 +375,19 @@ func showPortNumberDialog(w fyne.Window) {
 	portEntry := widget.NewEntry()
 	portEntry.SetPlaceHolder("8096")
 	portEntry.SetText(GetPort())
+	portStatusLabel := widget.NewLabel("Selected port will apply to future installs. To change the port on an already installed version, use the Option menu for that version.")
+	portStatusLabel.Wrapping = fyne.TextWrapWord
 
-	dialog.ShowForm(
-		"Tracker Port Number",
+	content := container.NewVBox(
+		widget.NewForm(widget.NewFormItem("Port Number", portEntry)),
+		portStatusLabel,
+	)
+
+	d := dialog.NewCustomConfirm(
+		"Default Tracker Port",
 		"Save",
 		"Cancel",
-		[]*widget.FormItem{
-			widget.NewFormItem("Port Number", portEntry),
-		},
+		content,
 		func(ok bool) {
 			if !ok {
 				return
@@ -382,11 +409,59 @@ func showPortNumberDialog(w fyne.Window) {
 				dialog.ShowError(fmt.Errorf("failed to save tracker port: %w", err), w)
 				return
 			}
-
-			dialog.ShowInformation("Port Updated", fmt.Sprintf("Tracker port set to %s. Restart the tracker to apply the new port.", newPort), w)
 		},
 		w,
 	)
+	d.Resize(fyne.NewSize(520, 200))
+	d.Show()
+}
+
+func showPortNumberDialogForVersion(w fyne.Window, version string) {
+	portEntry := widget.NewEntry()
+	portEntry.SetPlaceHolder("8096")
+	portEntry.SetText(GetPortForRelease(version))
+	portStatusLabel := widget.NewLabel(fmt.Sprintf("Version %s will use port %s.", version, portEntry.Text))
+	portEntry.OnChanged = func(_ string) {
+		portStatusLabel.SetText(fmt.Sprintf("Version %s will use port %s.", version, portEntry.Text))
+	}
+
+	content := container.NewVBox(
+		widget.NewForm(widget.NewFormItem("Port Number", portEntry)),
+		portStatusLabel,
+	)
+
+	d := dialog.NewCustomConfirm(
+		"Tracker Port Number",
+		"Save",
+		"Cancel",
+		content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+
+			newPort := strings.TrimSpace(portEntry.Text)
+			if newPort == "" {
+				dialog.ShowError(fmt.Errorf("port number is required"), w)
+				return
+			}
+
+			portNumber, err := strconv.Atoi(newPort)
+			if err != nil || portNumber < 1 || portNumber > 65535 {
+				dialog.ShowError(fmt.Errorf("port number must be an integer between 1 and 65535"), w)
+				return
+			}
+
+			if err := SavePropertyForRelease(version, "TRACKER_PORT", newPort); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to save Tracker port: %w", err), w)
+				return
+			}
+
+			dialog.ShowInformation("Tracker Port Updated", fmt.Sprintf("Tracker port for version %s set to %s. Restart Tracker for that version to apply the new port.", version, newPort), w)
+		},
+		w,
+	)
+	d.Show()
 }
 
 func refreshAvailableVersions(w fyne.Window) {

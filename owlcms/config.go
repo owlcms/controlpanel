@@ -295,6 +295,8 @@ func getPropertyOrDefault(props *properties.Properties, key, defaultValue string
 }
 
 func getPortFromProperties(props *properties.Properties) string {
+	// to change the port to 80 this is where the change would be made
+	// the port can be 80 when running on Windows, Pi and macOS; linux would stay at 8080
 	return getPropertyOrDefault(props, "OWLCMS_PORT", "8080")
 }
 
@@ -663,6 +665,13 @@ func SaveProperty(key, value string) error {
 	if environment == nil {
 		if err := InitEnv(); err != nil {
 			return fmt.Errorf("failed to initialize environment: %w", err)
+		}
+	}
+	if key == "OWLCMS_PORT" {
+		for _, releaseVersion := range getAllInstalledVersions() {
+			if err := EnsureReleaseEnvFromParent(releaseVersion); err != nil {
+				return fmt.Errorf("preserving configuration for version %s: %w", releaseVersion, err)
+			}
 		}
 	}
 

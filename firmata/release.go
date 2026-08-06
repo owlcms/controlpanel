@@ -220,6 +220,13 @@ func createReleaseDropdown(w fyne.Window) (*widget.Select, *fyne.Container) {
 							})
 							return
 						}
+						if err := EnsureReleaseEnvFromParent(installVersion); err != nil {
+							fyne.Do(func() {
+								progressDialog.Hide()
+								customdialog.ShowWideError(fmt.Errorf("installation completed but failed to create release configuration: %w", err), w)
+							})
+							return
+						}
 
 						// Log before closing the dialog
 						log.Println("Closing progress dialog")
