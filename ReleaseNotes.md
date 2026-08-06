@@ -11,6 +11,8 @@ The control panel is installed once. It will automatically download the correct 
 
 ### 3.6.0
 
+- Support setting the default ports prior to first install of a module
+- Support installing from zip for initial install
 - Raspberry installer now opens ports 80+ without root
 - Support for video module, including macOS
 - (internal) Code lint, macOS assumed to be dev platform.
