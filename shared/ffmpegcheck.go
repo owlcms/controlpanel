@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,11 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
+
+// ErrFFmpegNotFound reports that no usable FFmpeg could be located or installed.
+var ErrFFmpegNotFound = errors.New("ffmpeg not found")
+
+const ffmpegDownloadPage = "https://ffmpeg.org/download.html"
 
 const (
 	// Windows FFmpeg from BtbN (shared build, same repo as Linux)
@@ -75,6 +81,87 @@ func FindLocalFFmpeg() string {
 	}
 
 	return ""
+}
+
+// systemFFmpegSearchDirs lists well-known package manager install locations.
+// GUI apps launched from Finder/Dock (macOS) or a desktop launcher (Linux) do
+// not inherit the login shell PATH, so these must be probed explicitly.
+func systemFFmpegSearchDirs() []string {
+	switch GetGoos() {
+	case "darwin":
+		return []string{"/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"}
+	case "linux":
+		return []string{"/usr/local/bin", "/usr/bin", "/snap/bin"}
+	default:
+		return nil
+	}
+}
+
+func findFFmpegInSearchDirs() string {
+	for _, dir := range systemFFmpegSearchDirs() {
+		candidate := filepath.Join(dir, "ffmpeg")
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// FindSystemFFmpeg locates an ffmpeg executable outside the control panel.
+// On macOS the package manager directories are checked before the PATH, because
+// the PATH of a Finder-launched app is the bare launchd one and never contains
+// Homebrew.  Elsewhere the PATH wins so a user-chosen build takes precedence.
+func FindSystemFFmpeg() string {
+	if GetGoos() == "darwin" {
+		if path := findFFmpegInSearchDirs(); path != "" {
+			return path
+		}
+	}
+	if path, err := exec.LookPath("ffmpeg"); err == nil {
+		return path
+	}
+	return findFFmpegInSearchDirs()
+}
+
+// FindFFmpeg returns the bundled FFmpeg if installed, otherwise a system one.
+func FindFFmpeg() string {
+	if local := FindLocalFFmpeg(); local != "" {
+		return local
+	}
+	return FindSystemFFmpeg()
+}
+
+// ffmpegMissingMarkdown explains how to install FFmpeg on platforms where the
+// control panel cannot download a bundled build.
+func ffmpegMissingMarkdown() string {
+	if GetGoos() == "darwin" {
+		return "### FFmpeg not found\n\n" +
+			"The video modules need FFmpeg, which is not bundled on macOS. Install it either way:\n\n" +
+			"- Use an installer from the [FFmpeg download page](" + ffmpegDownloadPage + ")\n" +
+			"- Run `brew install ffmpeg` if you have [Homebrew](https://brew.sh)\n\n" +
+			"Then restart the control panel.\n"
+	}
+	return "### FFmpeg not found\n\n" +
+		"The video modules need FFmpeg. Install it either way:\n\n" +
+		"- Use an installer from the [FFmpeg download page](" + ffmpegDownloadPage + ")\n" +
+		"- Install the `ffmpeg` package with your package manager\n\n" +
+		"Then restart the control panel.\n"
+}
+
+// ShowFFmpegError reports err to the user, using a rich dialog with clickable
+// links when FFmpeg is simply missing.
+func ShowFFmpegError(err error, w fyne.Window) {
+	if !errors.Is(err, ErrFFmpegNotFound) {
+		dialog.ShowError(err, w)
+		return
+	}
+
+	body := widget.NewRichTextFromMarkdown(ffmpegMissingMarkdown())
+	body.Wrapping = fyne.TextWrapWord
+
+	d := dialog.NewCustom("FFmpeg Not Found", "Close", body, w)
+	d.Resize(fyne.NewSize(520, 300))
+	d.Show()
 }
 
 // getFFmpegDownloadURL returns the download URL for the current platform.
@@ -179,12 +266,12 @@ func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
 	if urlErr != nil {
 		// Platform not supported for bundled FFmpeg — fall back to system PATH.
 		log.Printf("FFmpeg check: cannot determine download URL (%v) — platform not supported for bundled FFmpeg", urlErr)
-		if systemFFmpeg, err := exec.LookPath("ffmpeg"); err == nil {
-			log.Printf("FFmpeg check: falling back to system PATH FFmpeg at %s", systemFFmpeg)
+		if systemFFmpeg := FindSystemFFmpeg(); systemFFmpeg != "" {
+			log.Printf("FFmpeg check: falling back to system FFmpeg at %s", systemFFmpeg)
 			return systemFFmpeg, nil
 		}
-		log.Println("FFmpeg check: not found on system PATH either — giving up")
-		return "", fmt.Errorf("FFmpeg not available: %v and not found on system PATH", urlErr)
+		log.Println("FFmpeg check: no system FFmpeg found either — giving up")
+		return "", ErrFFmpegNotFound
 	}
 
 	log.Printf("FFmpeg check: will download bundled FFmpeg from %s", downloadURL)
@@ -221,12 +308,12 @@ func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
 
 	if err != nil {
 		// Download failed — try system PATH as last resort.
-		log.Printf("FFmpeg check: download/install failed (%v) — trying system PATH as last resort", err)
-		if systemFFmpeg, lookErr := exec.LookPath("ffmpeg"); lookErr == nil {
-			log.Printf("FFmpeg check: falling back to system PATH FFmpeg at %s", systemFFmpeg)
+		log.Printf("FFmpeg check: download/install failed (%v) — trying system FFmpeg as last resort", err)
+		if systemFFmpeg := FindSystemFFmpeg(); systemFFmpeg != "" {
+			log.Printf("FFmpeg check: falling back to system FFmpeg at %s", systemFFmpeg)
 			return systemFFmpeg, nil
 		}
-		log.Println("FFmpeg check: not found on system PATH either — giving up")
+		log.Println("FFmpeg check: no system FFmpeg found either — giving up")
 		return "", fmt.Errorf("FFmpeg installation failed: %w", err)
 	}
 

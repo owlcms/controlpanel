@@ -27,8 +27,8 @@ func BuildVideoLaunchEnv(versionDir string) []string {
 	env = UpsertEnv(env, "VIDEO_LAUNCHER", GetLauncherVersionSemver())
 	env = UpsertEnv(env, "OWLCMS_CONTROLPANEL", GetLauncherVersionSemver())
 
-	// Export the shared FFmpeg path so child processes find it directly.
-	if ffmpegPath := FindLocalFFmpeg(); ffmpegPath != "" {
+	// Export the FFmpeg path so child processes find it directly.
+	if ffmpegPath := FindFFmpeg(); ffmpegPath != "" {
 		env = UpsertEnv(env, "VIDEO_FFMPEG_PATH", ffmpegPath)
 		// For Linux shared builds, prepend the bundled lib/ to LD_LIBRARY_PATH.
 		if GetGoos() == "linux" {

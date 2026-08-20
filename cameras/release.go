@@ -278,7 +278,7 @@ func downloadAndInstallVersion(downloadVersion, installVersion string, w fyne.Wi
 	if _, err := shared.EnsureFFmpegPrerequisite(w); err != nil {
 		log.Printf("FFmpeg prerequisite failed during cameras install: %v", err)
 		fyne.Do(func() {
-			dialog.ShowError(fmt.Errorf("FFmpeg installation failed: %w", err), w)
+			shared.ShowFFmpegError(err, w)
 		})
 		return
 	}
