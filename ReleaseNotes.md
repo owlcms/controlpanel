@@ -16,6 +16,7 @@ The control panel is installed once. It will automatically download the correct 
 - Raspberry installer now opens ports 80+ without root
 - Support for video module, including macOS
 - (internal) Code lint, macOS assumed to be dev platform.
+- On macOS, check for a brew install of ffmpeg when installing the video module because it is not built-in and not supported in the one we download for Windows.
 
 ### 3.5.0
 
