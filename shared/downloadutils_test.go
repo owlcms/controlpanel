@@ -13,8 +13,8 @@ func TestExtractZipFlattensSingleMeaningfulRoot(t *testing.T) {
 	zipPath := createTestZip(t, map[string]string{
 		"owlcms_4.68.0/":        "",
 		"owlcms_4.68.0/app.txt": "app",
-		".DS_Store":       "metadata",
-		"__MACOSX/._app":  "metadata",
+		".DS_Store":             "metadata",
+		"__MACOSX/._app":        "metadata",
 	})
 	dest := t.TempDir()
 
@@ -29,10 +29,25 @@ func TestExtractZipFlattensSingleMeaningfulRoot(t *testing.T) {
 	}
 }
 
+func TestExtractZipCanPreserveSingleMeaningfulRoot(t *testing.T) {
+	zipPath := createTestZip(t, map[string]string{
+		"jdk-25.0.2+10-jre/":              "",
+		"jdk-25.0.2+10-jre/bin/javaw.exe": "java",
+	})
+	dest := t.TempDir()
+
+	if err := ExtractZip(zipPath, dest, false); err != nil {
+		t.Fatalf("ExtractZip() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "jdk-25.0.2+10-jre", "bin", "javaw.exe")); err != nil {
+		t.Fatalf("archive root was not preserved: %v", err)
+	}
+}
+
 func TestExtractZipPreservesMultipleMeaningfulRoots(t *testing.T) {
 	zipPath := createTestZip(t, map[string]string{
 		"owlcms_4.68.0/app.txt": "app",
-		"config.ini":      "config",
+		"config.ini":            "config",
 	})
 	dest := t.TempDir()
 
@@ -46,17 +61,17 @@ func TestExtractZipPreservesMultipleMeaningfulRoots(t *testing.T) {
 
 func TestExtractZipPreservesOWLCMSRootLayout(t *testing.T) {
 	zipPath := createTestZip(t, map[string]string{
-		"database/":          "",
+		"database/":           "",
 		"database/data.mv.db": "database",
-		"env.properties":     "environment",
-		"local/":             "",
-		"local/config.json":  "config",
-		"logs/":              "",
-		"logs/owlcms.log":    "log",
-		"mqttData/":          "",
+		"env.properties":      "environment",
+		"local/":              "",
+		"local/config.json":   "config",
+		"logs/":               "",
+		"logs/owlcms.log":     "log",
+		"mqttData/":           "",
 		"mqttData/state.json": "state",
-		"owlcms.jar":         "application",
-		".DS_Store":          "metadata",
+		"owlcms.jar":          "application",
+		".DS_Store":           "metadata",
 	})
 	dest := t.TempDir()
 

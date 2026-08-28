@@ -97,7 +97,7 @@ func CheckJavaHeadless() error {
 
 	log.Println("Extracting files...")
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
-		if err := shared.ExtractZip(archivePath, javaDir); err != nil {
+		if err := shared.ExtractZip(archivePath, javaDir, false); err != nil {
 			return fmt.Errorf("error extracting Temurin zip: %w", err)
 		}
 	} else {
@@ -203,7 +203,7 @@ func CheckJava(statusLabel *widget.Label) error {
 	// Show extraction progress
 	progressBar.SetValue(0.9)
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
-		if err := shared.ExtractZip(archivePath, javaDir); err != nil {
+		if err := shared.ExtractZip(archivePath, javaDir, false); err != nil {
 			progressDialog.Hide()
 			return fmt.Errorf("error extracting Temurin zip: %w", err)
 		}

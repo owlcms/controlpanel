@@ -171,7 +171,7 @@ func DownloadAndInstallJava(temurinVersion string, statusLabel *widget.Label, w 
 		progressBar.SetValue(0.9)
 	}
 	if goosFunc() == "windows" && !IsWSL() {
-		if err := ExtractZip(archivePath, javaDir); err != nil {
+		if err := ExtractZip(archivePath, javaDir, false); err != nil {
 			if progressDialog != nil {
 				progressDialog.Hide()
 			}

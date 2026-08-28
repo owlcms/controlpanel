@@ -120,12 +120,17 @@ func GetDownloadURL(baseURL string) string {
 }
 
 // ExtractZip extracts a zip archive to the specified destination directory.
-func ExtractZip(src, dest string) error {
+// By default, a single top-level directory is stripped. Pass false to preserve it.
+func ExtractZip(src, dest string, stripSingleRoot ...bool) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
 		return fmt.Errorf("failed to open zip file %s: %w", src, err)
 	}
-	stripRoot := singleZipRoot(r.File)
+	shouldStripSingleRoot := len(stripSingleRoot) == 0 || stripSingleRoot[0]
+	stripRoot := ""
+	if shouldStripSingleRoot {
+		stripRoot = singleZipRoot(r.File)
+	}
 
 	for _, f := range r.File {
 		if isZipJunk(f.Name) || f.Name == "Procfile" || f.Name == "system.properties" {
