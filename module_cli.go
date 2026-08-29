@@ -385,7 +385,9 @@ func executeModuleInstallZip(cmd moduleCLICommand, out io.Writer) error {
 	if cmd.Module == "owlcms" {
 		finalVersion := owlcmsinstallutils.GetInstallationDirectoryName(version, owlcms.GetInstallDir())
 		extractPath := filepath.Join(owlcms.GetInstallDir(), finalVersion)
-		if err := extractLocalZipArchive(zipPath, extractPath, owlcms.GetInstallDir(), shared.ExtractZip); err != nil {
+		if err := extractLocalZipArchive(zipPath, extractPath, owlcms.GetInstallDir(), func(src, dest string) error {
+			return shared.ExtractZip(src, dest)
+		}); err != nil {
 			return err
 		}
 		if err := owlcms.EnsureReleaseEnvFromParent(finalVersion); err != nil {
