@@ -208,6 +208,17 @@ func createVideoLaunchButton(w fyne.Window, version string, buttonContainer *fyn
 				})
 				return
 			}
+			// macOS: the video child and its ffmpeg camera probes are
+			// attributed to the control panel by TCC. Get the camera
+			// authorization prompt answered before launching, otherwise
+			// the camera scan times out on every device.
+			if err := shared.EnsureCameraPermission(); err != nil {
+				log.Printf("Camera permission not granted: %v", err)
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
+				return
+			}
 			fyne.Do(func() {
 				if err := launchVideo(version, launchButton, w); err != nil {
 					dialog.ShowError(err, w)

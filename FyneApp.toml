@@ -1,6 +1,6 @@
 [Details]
-  Icon = "Icon.png"
-  Name = "owlcms"
-  ID = "app.owlcms.controlpanel"
-  Version = "3.0.5"
-  Build = 5400
+Icon = "Icon.png"
+Name = "owlcms"
+ID = "app.owlcms.controlpanel"
+Version = "3.0.5"
+Build = 5401

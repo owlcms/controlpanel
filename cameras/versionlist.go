@@ -212,6 +212,15 @@ func createCamerasLaunchButton(w fyne.Window, version string, buttonContainer *f
 				})
 				return
 			}
+			// macOS: camera probes of the child process are attributed to the
+			// control panel by TCC; get the prompt answered before launching.
+			if err := shared.EnsureCameraPermission(); err != nil {
+				log.Printf("Camera permission not granted: %v", err)
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
+				return
+			}
 			fyne.Do(func() {
 				if err := launchCameras(version, launchButton, w); err != nil {
 					dialog.ShowError(err, w)

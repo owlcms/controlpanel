@@ -83,6 +83,9 @@ jobs:
       run: |
         rm -rf owlcms.app
         fyne package -os darwin -icon Icon.png -name owlcms -executable build/owlcms
+        plutil -insert NSCameraUsageDescription \
+          -string "OWLCMS uses connected cameras for competition video and replay." \
+          owlcms.app/Contents/Info.plist
 
     - name: Move macOS amd64 app to dist directory
       if: ${{ env.BUILD_MAC == 'true' }}
@@ -110,6 +113,7 @@ jobs:
       if: ${{ env.BUILD_MAC == 'true' }}
       run: |
         codesign --force --deep --options runtime --timestamp \
+          --entitlements dist/owlcms.entitlements \
           --sign "$APPLE_SIGNING_IDENTITY" dist/darwin-amd64/owlcms.app
         codesign --verify --deep --strict dist/darwin-amd64/owlcms.app
 
@@ -205,6 +209,9 @@ jobs:
       run: |
         rm -rf owlcms.app
         fyne package -os darwin -icon Icon.png -name owlcms -executable build/owlcms
+        plutil -insert NSCameraUsageDescription \
+          -string "OWLCMS uses connected cameras for competition video and replay." \
+          owlcms.app/Contents/Info.plist
 
     - name: Move macOS arm64 app to dist directory
       if: ${{ env.BUILD_MAC == 'true' }}
@@ -232,6 +239,7 @@ jobs:
       if: ${{ env.BUILD_MAC == 'true' }}
       run: |
         codesign --force --deep --options runtime --timestamp \
+          --entitlements dist/owlcms.entitlements \
           --sign "$APPLE_SIGNING_IDENTITY" dist/darwin-arm64/owlcms.app
         codesign --verify --deep --strict dist/darwin-arm64/owlcms.app
 

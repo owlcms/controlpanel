@@ -15,6 +15,7 @@ The control panel is installed once. It will automatically download the correct 
 - Support installing from zip for initial install
 - Raspberry installer now opens ports 80+ so OWLCMS can access them without root.
 - Support for new video module, including macOS
+- Fix camera detection timing out when the video module is launched from the macOS control panel.
 - (internal) Code lint, macOS assumed to be dev platform.
 - On macOS, check for a brew install of ffmpeg when installing the video module because it is not built-in and not supported in the one we download for Windows.
 
