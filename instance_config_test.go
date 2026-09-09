@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 
 	"controlpanel/owlcms"
@@ -90,52 +87,6 @@ func TestInitWithoutInstanceUsesMainInstance(t *testing.T) {
 	}
 	if got := shared.GetControlPanelInstallDir(); got != filepath.Join(base, "owlcms-controlpanel") {
 		t.Fatalf("expected control panel dir %q, got %q", filepath.Join(base, "owlcms-controlpanel"), got)
-	}
-}
-
-func TestImplicitHeadlessInstanceUsesInitializedInstance(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	if runtime.GOOS == "windows" {
-		t.Setenv("APPDATA", home)
-	} else {
-		t.Setenv("APPDATA", "")
-	}
-	t.Setenv("CONTROLPANEL_INSTALLDIR", "")
-	t.Setenv("OWLCMS_INSTALLDIR", "")
-	t.Setenv("TRACKER_INSTALLDIR", "")
-	t.Setenv("RUNTIME_DIR", "")
-	t.Setenv("CONTROLPANEL_INSTANCE", "")
-	resetInstallDirsForTest()
-
-	if err := applyCLIInstanceOptions(cliOptions{instanceArg: "records", init: true}); err != nil {
-		t.Fatalf("initialize instance: %v", err)
-	}
-
-	t.Setenv("CONTROLPANEL_INSTALLDIR", "")
-	t.Setenv("OWLCMS_INSTALLDIR", "")
-	t.Setenv("TRACKER_INSTALLDIR", "")
-	t.Setenv("RUNTIME_DIR", "")
-	t.Setenv("CONTROLPANEL_INSTANCE", "")
-	resetInstallDirsForTest()
-
-	owlcmsValue, trackerValue, err := maybeApplyImplicitInstanceForHeadless(cliOptions{}, "records", "")
-	if err != nil {
-		t.Fatalf("infer implicit instance: %v", err)
-	}
-	if owlcmsValue != "latest" {
-		t.Fatalf("expected owlcms value latest, got %q", owlcmsValue)
-	}
-	if trackerValue != "" {
-		t.Fatalf("expected empty tracker value, got %q", trackerValue)
-	}
-	if got := os.Getenv("CONTROLPANEL_INSTANCE"); got != "records" {
-		t.Fatalf("expected CONTROLPANEL_INSTANCE=records, got %q", got)
-	}
-
-	wantOwlcmsDir := filepath.Join(filepath.Dir(shared.DefaultControlPanelInstallDir()), "records-owlcms")
-	if got := owlcms.GetInstallDir(); got != wantOwlcmsDir {
-		t.Fatalf("expected owlcms install dir %q, got %q", wantOwlcmsDir, got)
 	}
 }
 
@@ -286,67 +237,16 @@ func TestResolveInstancePathsForMainInstanceAcceptsOwlcmsOwlcms(t *testing.T) {
 	}
 }
 
-func TestImplicitHeadlessInstanceDoesNotOverrideInstalledVersion(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GOOS", "linux")
-	t.Setenv("APPDATA", "")
-	t.Setenv("CONTROLPANEL_INSTALLDIR", "")
-	t.Setenv("OWLCMS_INSTALLDIR", "")
-	t.Setenv("TRACKER_INSTALLDIR", "")
-	t.Setenv("RUNTIME_DIR", "")
-	t.Setenv("CONTROLPANEL_INSTANCE", "")
-	resetInstallDirsForTest()
-
-	if err := applyCLIInstanceOptions(cliOptions{instanceArg: "records", init: true}); err != nil {
-		t.Fatalf("initialize instance: %v", err)
-	}
-
-	t.Setenv("CONTROLPANEL_INSTALLDIR", "")
-	t.Setenv("OWLCMS_INSTALLDIR", "")
-	t.Setenv("TRACKER_INSTALLDIR", "")
-	t.Setenv("RUNTIME_DIR", "")
-	t.Setenv("CONTROLPANEL_INSTANCE", "")
-	resetInstallDirsForTest()
-
-	defaultVersionDir := filepath.Join(shared.GetOwlcmsInstallDir(), "records")
-	if err := os.MkdirAll(defaultVersionDir, 0755); err != nil {
-		t.Fatalf("create default version dir: %v", err)
-	}
-
-	owlcmsValue, trackerValue, err := maybeApplyImplicitInstanceForHeadless(cliOptions{}, "records", "")
-	if err != nil {
-		t.Fatalf("infer implicit instance: %v", err)
-	}
-	if owlcmsValue != "records" {
-		t.Fatalf("expected owlcms value to stay records, got %q", owlcmsValue)
-	}
-	if trackerValue != "" {
-		t.Fatalf("expected empty tracker value, got %q", trackerValue)
-	}
-	if got := os.Getenv("CONTROLPANEL_INSTANCE"); got != "" {
-		t.Fatalf("expected CONTROLPANEL_INSTANCE to remain empty, got %q", got)
-	}
-}
-
 func TestParseCLIOptionsUsesBareArgumentAsInstanceName(t *testing.T) {
-	opts := parseCLIOptions([]string{"records", "--owlcms", "latest"})
+	opts := parseCLIOptions([]string{"records"})
 
 	if opts.instanceArg != "records" {
 		t.Fatalf("expected instanceArg=records, got %q", opts.instanceArg)
 	}
 }
 
-func TestParseCLIOptionsDoesNotTreatDaemonValueAsInstanceName(t *testing.T) {
-	opts := parseCLIOptions([]string{"--owlcms", "latest"})
-
-	if opts.instanceArg != "" {
-		t.Fatalf("expected empty instanceArg, got %q", opts.instanceArg)
-	}
-}
-
 func TestParseCLIOptionsAllowsPositionalInstanceAfterOtherSwitches(t *testing.T) {
-	opts := parseCLIOptions([]string{"--runtime-dir", "/tmp/runtime", "records", "--tracker", "latest"})
+	opts := parseCLIOptions([]string{"--runtime-dir", "/tmp/runtime", "records"})
 
 	if opts.runtimeArg != "/tmp/runtime" {
 		t.Fatalf("expected runtimeArg=/tmp/runtime, got %q", opts.runtimeArg)
@@ -356,27 +256,8 @@ func TestParseCLIOptionsAllowsPositionalInstanceAfterOtherSwitches(t *testing.T)
 	}
 }
 
-func TestParseCLIOptionsDoesNotTreatPositionalInstanceAsOwlcmsValueWhenValueOmitted(t *testing.T) {
-	opts := parseCLIOptions([]string{"records", "--owlcms"})
-
-	if opts.instanceArg != "records" {
-		t.Fatalf("expected instanceArg=records, got %q", opts.instanceArg)
-	}
-}
-
-func TestParseCLIOptionsEnablesMQTTFlag(t *testing.T) {
-	opts := parseCLIOptions([]string{"records", "--owlcms", "--mqtt"})
-
-	if !opts.mqtt {
-		t.Fatal("expected mqtt option to be enabled")
-	}
-	if opts.instanceArg != "records" {
-		t.Fatalf("expected instanceArg=records, got %q", opts.instanceArg)
-	}
-}
-
-func TestParseCLIOptionsHelpTakesPrecedenceOverOtherControlVerbs(t *testing.T) {
-	opts := parseCLIOptions([]string{"records", "--owlcms", "list", "--tracker", "stop", "--help"})
+func TestParseCLIOptionsRecognizesHelp(t *testing.T) {
+	opts := parseCLIOptions([]string{"records", "--help"})
 
 	if !opts.help {
 		t.Fatal("expected help option to be enabled")
@@ -386,267 +267,22 @@ func TestParseCLIOptionsHelpTakesPrecedenceOverOtherControlVerbs(t *testing.T) {
 	}
 }
 
-func TestParseDaemonFlagsDefaultsMissingValuesToPrevious(t *testing.T) {
-	owlcmsValue, trackerValue := parseDaemonFlags([]string{"--owlcms", "--tracker"})
-
-	if owlcmsValue != "previous" {
-		t.Fatalf("expected owlcms value previous, got %q", owlcmsValue)
-	}
-	if trackerValue != "previous" {
-		t.Fatalf("expected tracker value previous, got %q", trackerValue)
-	}
-}
-
-func TestParseDaemonFlagsKeepsExplicitValues(t *testing.T) {
-	owlcmsValue, trackerValue := parseDaemonFlags([]string{"--owlcms", "3.3.0", "--tracker", "stop"})
-
-	if owlcmsValue != "3.3.0" {
-		t.Fatalf("expected owlcms value 3.3.0, got %q", owlcmsValue)
-	}
-	if trackerValue != "stop" {
-		t.Fatalf("expected tracker value stop, got %q", trackerValue)
-	}
-}
-
-func TestParseDaemonFlagsKeepsListValue(t *testing.T) {
-	owlcmsValue, trackerValue := parseDaemonFlags([]string{"--owlcms", "list", "--tracker", "latest"})
-
-	if owlcmsValue != "list" {
-		t.Fatalf("expected owlcms value list, got %q", owlcmsValue)
-	}
-	if trackerValue != "latest" {
-		t.Fatalf("expected tracker value latest, got %q", trackerValue)
-	}
-}
-
-func TestParseDaemonFlagsDoesNotConsumePositionalInstance(t *testing.T) {
-	owlcmsValue, trackerValue := parseDaemonFlags([]string{"records", "--owlcms", "--tracker"})
-
-	if owlcmsValue != "previous" {
-		t.Fatalf("expected owlcms value previous, got %q", owlcmsValue)
-	}
-	if trackerValue != "previous" {
-		t.Fatalf("expected tracker value previous, got %q", trackerValue)
-	}
-}
-
-func TestParseDaemonFlagsIgnoresMQTTFlag(t *testing.T) {
-	owlcmsValue, trackerValue := parseDaemonFlags([]string{"records", "--owlcms", "--mqtt", "--tracker"})
-
-	if owlcmsValue != "previous" {
-		t.Fatalf("expected owlcms value previous, got %q", owlcmsValue)
-	}
-	if trackerValue != "previous" {
-		t.Fatalf("expected tracker value previous, got %q", trackerValue)
-	}
-}
-
-func TestResolveVersionPreviousFallsBackToLatestWhenNoPrevious(t *testing.T) {
-	base := t.TempDir()
-	// Create two fake installed version directories
-	os.MkdirAll(filepath.Join(base, "65.0.0"), 0755)
-	os.MkdirAll(filepath.Join(base, "64.0.0"), 0755)
-
-	allVersions := []string{"65.0.0", "64.0.0"} // semver descending
-
-	// getLastRunVersion returns "" to simulate no previous version recorded
-	version, err := resolveVersion("owlcms", "previous", allVersions, base, func() string { return "" })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "65.0.0" {
-		t.Fatalf("expected fallback to latest 65.0.0, got %q", version)
-	}
-}
-
-func TestResolveVersionPreviousUsesRecordedVersion(t *testing.T) {
-	base := t.TempDir()
-	os.MkdirAll(filepath.Join(base, "65.0.0"), 0755)
-	os.MkdirAll(filepath.Join(base, "64.0.0"), 0755)
-
-	allVersions := []string{"65.0.0", "64.0.0"}
-
-	version, err := resolveVersion("owlcms", "previous", allVersions, base, func() string { return "64.0.0" })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "64.0.0" {
-		t.Fatalf("expected previous version 64.0.0, got %q", version)
-	}
-}
-
-func TestResolveVersionPreviousFallsBackWhenPreviousUninstalled(t *testing.T) {
-	base := t.TempDir()
-	os.MkdirAll(filepath.Join(base, "65.0.0"), 0755)
-
-	allVersions := []string{"65.0.0"}
-
-	// Previous version 64.0.0 was recorded but is no longer installed
-	version, err := resolveVersion("owlcms", "previous", allVersions, base, func() string { return "64.0.0" })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "65.0.0" {
-		t.Fatalf("expected fallback to latest 65.0.0, got %q", version)
-	}
-}
-
-func TestResolveVersionTrackerPreviousFallsBackToLatestWhenNoPrevious(t *testing.T) {
-	base := t.TempDir()
-	os.MkdirAll(filepath.Join(base, "2.4.0"), 0755)
-	os.MkdirAll(filepath.Join(base, "2.3.0"), 0755)
-
-	allVersions := []string{"2.4.0", "2.3.0"}
-
-	version, err := resolveVersion("tracker", "previous", allVersions, base, func() string { return "" })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "2.4.0" {
-		t.Fatalf("expected fallback to latest 2.4.0, got %q", version)
-	}
-}
-
-func TestResolveVersionTrackerPreviousUsesRecordedVersion(t *testing.T) {
-	base := t.TempDir()
-	os.MkdirAll(filepath.Join(base, "2.4.0"), 0755)
-	os.MkdirAll(filepath.Join(base, "2.3.0"), 0755)
-
-	allVersions := []string{"2.4.0", "2.3.0"}
-
-	version, err := resolveVersion("tracker", "previous", allVersions, base, func() string { return "2.3.0" })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "2.3.0" {
-		t.Fatalf("expected previous version 2.3.0, got %q", version)
-	}
-}
-
-func TestResolveVersionTrackerPreviousFallsBackWhenPreviousUninstalled(t *testing.T) {
-	base := t.TempDir()
-	os.MkdirAll(filepath.Join(base, "2.4.0"), 0755)
-
-	allVersions := []string{"2.4.0"}
-
-	version, err := resolveVersion("tracker", "previous", allVersions, base, func() string { return "2.3.0" })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if version != "2.4.0" {
-		t.Fatalf("expected fallback to latest 2.4.0, got %q", version)
-	}
-}
-
-func TestConfigureTrackerConnectionForHeadlessTandemUsesSelectedTrackerReleasePort(t *testing.T) {
-	base := t.TempDir()
-	owlcmsDir := filepath.Join(base, "owlcms")
-	trackerDir := filepath.Join(base, "tracker")
-	t.Cleanup(resetInstallDirsForTest)
-	owlcms.SetInstallDir(owlcmsDir)
-	tracker.SetInstallDir(trackerDir)
-
-	for _, dir := range []string{
-		filepath.Join(owlcmsDir, "65.0.0"),
-		filepath.Join(trackerDir, "2.3.0"),
+func TestValidateCLIOptionsRejectsLegacyModuleOptions(t *testing.T) {
+	for _, args := range [][]string{
+		{"--module", "owlcms", "--install"},
+		{"--launch"},
+		{"--mqtt"},
+		{"--owlcms", "latest"},
 	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
+		if err := validateCLIOptions(args); err == nil {
+			t.Errorf("expected legacy options %#v to be rejected", args)
 		}
 	}
+}
 
-	if err := os.WriteFile(filepath.Join(owlcmsDir, "env.properties"), []byte("OWLCMS_PORT=8080\nTEMURIN_VERSION=jdk-25\n"), 0o644); err != nil {
-		t.Fatalf("write owlcms env: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(owlcmsDir, "65.0.0", "env.properties"), []byte(""), 0o644); err != nil {
-		t.Fatalf("write owlcms release env: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(trackerDir, "env.properties"), []byte("TRACKER_PORT=8096\n"), 0o644); err != nil {
-		t.Fatalf("write tracker env: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(trackerDir, "2.3.0", "env.properties"), []byte("TRACKER_PORT=18123\n"), 0o644); err != nil {
-		t.Fatalf("write tracker release env: %v", err)
-	}
-
-	if err := configureTrackerConnectionForHeadlessTandem("65.0.0", "2.3.0"); err != nil {
-		t.Fatalf("configure tandem: %v", err)
-	}
-
-	if got := owlcms.GetTrackerConnectionPortForRelease("65.0.0"); got != "18123" {
-		t.Fatalf("expected stored tracker port 18123, got %q", got)
-	}
-
-	content, err := os.ReadFile(filepath.Join(owlcmsDir, "65.0.0", "env.properties"))
+func TestValidateCLIOptionsAllowsREPLStartupOptions(t *testing.T) {
+	err := validateCLIOptions([]string{"--instance", "records", "--runtime-dir", "/tmp/runtime", "--repl"})
 	if err != nil {
-		t.Fatalf("read owlcms release env: %v", err)
-	}
-	if !strings.Contains(string(content), "OWLCMS_VIDEODATA = ws://127.0.0.1:18123/ws") {
-		t.Fatalf("expected OWLCMS_VIDEODATA to reference tracker release port, got %q", string(content))
-	}
-}
-
-func TestHandleHeadlessListRequestsListsRequestedModuleOnly(t *testing.T) {
-	var out bytes.Buffer
-	owlcmsRequest, trackerRequest, listed := handleHeadlessListRequests(&out, "list", "latest")
-
-	if !listed {
-		t.Fatal("expected list request to be handled")
-	}
-	if owlcmsRequest != "" {
-		t.Fatalf("expected owlcms request to be cleared after listing, got %q", owlcmsRequest)
-	}
-	if trackerRequest != "latest" {
-		t.Fatalf("expected tracker request to remain latest, got %q", trackerRequest)
-	}
-	if !strings.Contains(out.String(), "owlcms available versions:") {
-		t.Fatalf("expected owlcms list output, got %q", out.String())
-	}
-	if strings.Contains(out.String(), "tracker available versions:") {
-		t.Fatalf("did not expect tracker list output, got %q", out.String())
-	}
-}
-
-func TestImplicitInstanceCandidateIgnoresListVerb(t *testing.T) {
-	if got := implicitInstanceCandidate("list", "/tmp/install"); got != "" {
-		t.Fatalf("expected list verb to be ignored for implicit instance inference, got %q", got)
-	}
-}
-
-func TestHandleHeadlessListRequestsListsBothModules(t *testing.T) {
-	var out bytes.Buffer
-	owlcmsRequest, trackerRequest, listed := handleHeadlessListRequests(&out, "list", "list")
-
-	if !listed {
-		t.Fatal("expected list requests to be handled")
-	}
-	if owlcmsRequest != "" || trackerRequest != "" {
-		t.Fatalf("expected both requests to be cleared, got owlcms=%q tracker=%q", owlcmsRequest, trackerRequest)
-	}
-	if !strings.Contains(out.String(), "owlcms available versions:") {
-		t.Fatalf("expected owlcms list output, got %q", out.String())
-	}
-	if !strings.Contains(out.String(), "tracker available versions:") {
-		t.Fatalf("expected tracker list output, got %q", out.String())
-	}
-}
-
-func TestHandleHeadlessListRequestsLeavesOtherControlVerbsUnchanged(t *testing.T) {
-	var out bytes.Buffer
-	owlcmsRequest, trackerRequest, listed := handleHeadlessListRequests(&out, "list", "stop")
-
-	if !listed {
-		t.Fatal("expected list request to be handled")
-	}
-	if owlcmsRequest != "" {
-		t.Fatalf("expected owlcms request to be cleared after listing, got %q", owlcmsRequest)
-	}
-	if trackerRequest != "stop" {
-		t.Fatalf("expected tracker stop request to remain unchanged, got %q", trackerRequest)
-	}
-	if !strings.Contains(out.String(), "owlcms available versions:") {
-		t.Fatalf("expected owlcms list output, got %q", out.String())
-	}
-	if strings.Contains(out.String(), "tracker available versions:") {
-		t.Fatalf("did not expect tracker list output, got %q", out.String())
+		t.Fatalf("expected REPL startup options to be accepted: %v", err)
 	}
 }

@@ -19,7 +19,6 @@ type cliOptions struct {
 	instanceArg string
 	runtimeArg  string
 	init        bool
-	mqtt        bool
 	help        bool
 }
 
@@ -52,23 +51,13 @@ func parseCLIOptions(args []string) cliOptions {
 				i++
 				opts.instanceArg = strings.TrimSpace(args[i])
 			}
-		case "-m", "--module", "--version", "--update-to", "--duplicate", "--from-version", "--to-version", "--remove", "--port", "--install-zip", "--create-zip":
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++
-			}
-		case "--install", "--local-tracker":
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++
-			}
-		case "--launch", "--stop", "--list", "--import", "--background":
-		case "--owlcms", "--tracker":
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+		case "--repl":
+		case "--batch":
+			if i+1 < len(args) {
 				i++
 			}
 		case "--init":
 			opts.init = true
-		case "--mqtt":
-			opts.mqtt = true
 		case "--help", "-h":
 			opts.help = true
 		default:
@@ -81,159 +70,66 @@ func parseCLIOptions(args []string) cliOptions {
 	return opts
 }
 
+func validateCLIOptions(args []string) error {
+	valueOptions := map[string]bool{
+		"--instance-dir": true,
+		"--instance_dir": true,
+		"--runtime-dir":  true,
+		"--runtime_dir":  true,
+		"-i":             true,
+		"--instance":     true,
+		"--batch":        true,
+	}
+	flagOptions := map[string]bool{
+		"--init": true,
+		"--repl": true,
+		"--help": true,
+		"-h":     true,
+	}
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if valueOptions[arg] {
+			if index+1 >= len(args) {
+				return fmt.Errorf("%s requires a value", arg)
+			}
+			index++
+			continue
+		}
+		if flagOptions[arg] || !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return fmt.Errorf("unsupported option %q", arg)
+	}
+	return nil
+}
+
 func printUsage() {
-	fmt.Println("Usage: controlpanel [instance options] --module <owlcms|tracker> <action> [action options]")
+	fmt.Println("Usage: controlpanel [instance options]")
+	fmt.Println("       controlpanel [instance options] --repl")
+	fmt.Println("       controlpanel [instance options] --batch <file|->")
 	fmt.Println("")
-	fmt.Println("Most common cases:")
-	fmt.Println("  Start OWLCMS in the foreground:")
-	fmt.Println("    controlpanel --module owlcms --launch")
-	fmt.Println("  Start OWLCMS in the background:")
-	fmt.Println("    controlpanel --module owlcms --launch --background")
-	fmt.Println("  Start OWLCMS and connect it to a local tracker:")
-	fmt.Println("    controlpanel --module owlcms --launch --local-tracker")
-	fmt.Println("  Start Tracker in the foreground:")
-	fmt.Println("    controlpanel --module tracker --launch")
-	fmt.Println("  Start Tracker in the background:")
-	fmt.Println("    controlpanel --module tracker --launch --background")
-	fmt.Println("  Stop OWLCMS:")
-	fmt.Println("    controlpanel --module owlcms --stop")
-	fmt.Println("  Stop Tracker:")
-	fmt.Println("    controlpanel --module tracker --stop")
+	fmt.Println("Without --repl or --batch, opens the graphical Control Panel.")
+	fmt.Println("--repl opens the textual control loop; --batch runs its commands from a file or standard input.")
 	fmt.Println("")
-	fmt.Println("Version, update, and import commands:")
-	fmt.Println("  List installed versions:")
-	fmt.Println("    controlpanel --module owlcms --list")
-	fmt.Println("    controlpanel --module tracker --list")
-	fmt.Println("  Install a new downloaded version:")
-	fmt.Println("    controlpanel --module owlcms --install latest")
-	fmt.Println("    controlpanel --module tracker --install latest")
-	fmt.Println("  Install from or create a local ZIP:")
-	fmt.Println("    controlpanel --module owlcms --install-zip C:/Downloads/owlcms_66.0.0.zip")
-	fmt.Println("    controlpanel --module tracker --create-zip C:/Backups/tracker.zip --version 3.4.0")
-	fmt.Println("  Update by copying data/config from an installed source version:")
-	fmt.Println("    controlpanel --module owlcms --version latest --update-to latest")
-	fmt.Println("    controlpanel --module tracker --version 3.3.0 --update-to 3.4.0")
-	fmt.Println("  Import data/config between installed local versions:")
-	fmt.Println("    controlpanel --module owlcms --import --from-version 65.0.0 --to-version 66.0.0")
-	fmt.Println("    controlpanel --module tracker --import --from-version 3.3.0 --to-version 3.4.0")
-	fmt.Println("  Duplicate or remove an installed version:")
-	fmt.Println("    controlpanel --module owlcms --duplicate practice-copy --from-version 66.0.0")
-	fmt.Println("    controlpanel --module tracker --remove 3.3.0")
+	fmt.Println("Instance options:")
+	fmt.Println("  -i, --instance <name>                 Select a named sibling instance")
+	fmt.Println("  --init                                 Initialize the selected instance and exit")
+	fmt.Println("  -h, --help                             Show this help and exit")
 	fmt.Println("")
-	fmt.Println("Switch reference:")
-	fmt.Println("  Module selection:")
-	fmt.Println("    -m, --module <owlcms|tracker>        Selects the module to manage")
-	fmt.Println("  Actions:")
-	fmt.Println("    --launch                             Starts the selected module")
-	fmt.Println("    --stop                               Stops the selected running module")
-	fmt.Println("    --list                               Lists installed local versions")
-	fmt.Println("    --install [latest|<github-version>]  Downloads a clean new version")
-	fmt.Println("    --install-zip <zip-file>             Installs a local ZIP file, often from a federation")
-	fmt.Println("    --create-zip <zip-file|directory>    Creates a ZIP from the version selected by --version")
-	fmt.Println("                                        Uses a .zip path exactly, or creates a timestamped file in an existing directory")
-	fmt.Println("    --update-to <latest|github-version>  Updates using --version as local source")
-	fmt.Println("    --import                             Imports data/config between installed versions")
-	fmt.Println("    --duplicate <new-name>               Copies --from-version to a new directory")
-	fmt.Println("    --remove <local-version>             Removes an installed version directory")
-	fmt.Println("  Launch options:")
-	fmt.Println("    --version <latest|previous|version>  Local version selector; default: latest")
-	fmt.Println("    --background                         Runs detached and returns the terminal")
-	fmt.Println("    --port <port>                        Stores a version-specific launch port")
-	fmt.Println("    --local-tracker [port]               OWLCMS only; default tracker port 8096")
-	fmt.Println("    --mqtt                               OWLCMS only; enables embedded MQTT")
-	fmt.Println("  Version-copy options:")
-	fmt.Println("    --from-version <local-version>       Source version for import/duplicate")
-	fmt.Println("    --to-version <local-version>         Destination version for import")
-	fmt.Println("  General:")
-	fmt.Println("    --help, -h                           Shows this help and exits")
+	fmt.Println("Advanced directory overrides:")
+	fmt.Println("  --instance-dir, --instance_dir <path> Use a nonstandard control panel directory")
+	fmt.Println("  --runtime-dir, --runtime_dir <path>   Use a nonstandard shared runtime directory")
+	fmt.Println("  Named instances normally choose both directories automatically.")
 	fmt.Println("")
-	fmt.Println("Interactive control panel:")
-	fmt.Println("    controlpanel")
-	fmt.Println("    controlpanel --instance records")
+	fmt.Println("Examples:")
+	fmt.Println("  controlpanel")
+	fmt.Println("  controlpanel --instance records")
+	fmt.Println("  controlpanel --instance records --init")
+	fmt.Println("  controlpanel --repl")
+	fmt.Println("  controlpanel --instance records --batch competition.commands")
 	fmt.Println("")
-	fmt.Println("Multiple instances:")
-	fmt.Println("  Select an instance by name:")
-	fmt.Println("    controlpanel --instance records --module owlcms --launch --background --port 8180 --local-tracker 8196")
-	fmt.Println("    controlpanel --instance records --module tracker --launch --background --port 8196")
-	fmt.Println("  Positional instance shorthand is also accepted:")
-	fmt.Println("    controlpanel records --module owlcms --stop")
-	fmt.Println("  Instance switches:")
-	fmt.Println("    -i, --instance <name>                 Selects a named sibling instance")
-	fmt.Println("    --instance-dir, --instance_dir <path> Uses an explicit control panel directory")
-	fmt.Println("    --runtime-dir, --runtime_dir <path>   Uses an explicit Java/Node/FFmpeg runtime directory")
-	fmt.Println("")
-	fmt.Println("Initialize instance directories:")
-	fmt.Println("    controlpanel --instance records --init")
-	fmt.Println("    controlpanel --instance records --runtime-dir runtime-records --init")
-	fmt.Println("    controlpanel --instance-dir C:/owlcms/controlpanel-records --runtime-dir C:/owlcms/runtime --init")
-	fmt.Println("")
-}
-
-func maybeApplyImplicitInstanceForHeadless(opts cliOptions, owlcmsVersion, trackerVersion string) (string, string, error) {
-	if strings.TrimSpace(opts.instanceArg) != "" {
-		return owlcmsVersion, trackerVersion, nil
-	}
-	if strings.TrimSpace(os.Getenv("CONTROLPANEL_INSTANCE")) != "" {
-		return owlcmsVersion, trackerVersion, nil
-	}
-
-	candidate, err := inferImplicitInstanceName(owlcmsVersion, trackerVersion)
-	if err != nil || candidate == "" {
-		return owlcmsVersion, trackerVersion, err
-	}
-
-	if err := applyCLIInstanceOptions(cliOptions{instanceArg: candidate}); err != nil {
-		return owlcmsVersion, trackerVersion, err
-	}
-
-	if strings.EqualFold(strings.TrimSpace(owlcmsVersion), candidate) {
-		owlcmsVersion = "latest"
-	}
-	if strings.EqualFold(strings.TrimSpace(trackerVersion), candidate) {
-		trackerVersion = "latest"
-	}
-
-	return owlcmsVersion, trackerVersion, nil
-}
-
-func inferImplicitInstanceName(owlcmsVersion, trackerVersion string) (string, error) {
-	owlcmsCandidate := implicitInstanceCandidate(owlcmsVersion, shared.GetOwlcmsInstallDir())
-	trackerCandidate := implicitInstanceCandidate(trackerVersion, shared.GetTrackerInstallDir())
-
-	switch {
-	case owlcmsCandidate == "" && trackerCandidate == "":
-		return "", nil
-	case owlcmsCandidate == "":
-		return trackerCandidate, nil
-	case trackerCandidate == "":
-		return owlcmsCandidate, nil
-	case strings.EqualFold(owlcmsCandidate, trackerCandidate):
-		return owlcmsCandidate, nil
-	default:
-		return "", fmt.Errorf("headless launch is ambiguous: %q looks like instance %q and %q; specify --instance-dir explicitly", strings.TrimSpace(owlcmsVersion)+"/"+strings.TrimSpace(trackerVersion), owlcmsCandidate, trackerCandidate)
-	}
-}
-
-func implicitInstanceCandidate(requested, installDir string) string {
-	requested = strings.TrimSpace(requested)
-	if requested == "" || strings.EqualFold(requested, "latest") || strings.EqualFold(requested, "stop") || strings.EqualFold(requested, "list") {
-		return ""
-	}
-
-	if _, err := os.Stat(filepath.Join(installDir, requested)); err == nil {
-		return ""
-	}
-
-	paths, err := resolveInstancePaths(requested)
-	if err != nil {
-		return ""
-	}
-
-	if _, err := os.Stat(controlPanelEnvPath(paths.ControlPanelDir)); err == nil {
-		return requested
-	}
-
-	return ""
+	fmt.Println("Use 'help' inside the REPL for its command reference.")
 }
 
 func applyCLIInstanceOptions(opts cliOptions) error {

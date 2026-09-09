@@ -10,6 +10,8 @@ if [[ $# -gt 1 ]]; then
     exit 1
 fi
 
-controlpanel --instance owlcms --module owlcms --stop
-controlpanel --instance owlcms --module owlcms --version latest --update-to "$target_version"
-controlpanel --instance owlcms --module owlcms --version latest --launch --background
+printf '%s\n' \
+    'owlcms stop' \
+    "owlcms update A $target_version" \
+    'owlcms start' |
+    controlpanel --instance owlcms --batch -

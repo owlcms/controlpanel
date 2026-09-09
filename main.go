@@ -140,13 +140,18 @@ func saveModuleVisibility(preferences fyne.Preferences, visibility moduleVisibil
 func main() {
 	args := os.Args[1:]
 	cliOptions := parseCLIOptions(args)
-	moduleCommand, moduleCommandFound, moduleCommandErr := parseModuleCommand(args)
+	replInvocation, replFound, replErr := parseREPLInvocation(args)
+	cliOptionsErr := validateCLIOptions(args)
 	if cliOptions.help {
 		printUsage()
 		return
 	}
-	if moduleCommandErr != nil {
-		fmt.Fprintf(os.Stderr, "command line: %v\n", moduleCommandErr)
+	if replErr != nil {
+		fmt.Fprintf(os.Stderr, "command line: %v\n", replErr)
+		os.Exit(1)
+	}
+	if cliOptionsErr != nil {
+		fmt.Fprintf(os.Stderr, "command line: %v\n", cliOptionsErr)
 		os.Exit(1)
 	}
 	if err := applyCLIInstanceOptions(cliOptions); err != nil {
@@ -193,17 +198,8 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Llongfile)
 	log.Printf("Starting OWLCMS Control Panel %s", shared.GetLauncherVersion())
 
-	if moduleCommandFound {
-		moduleCommand.MQTT = moduleCommand.MQTT || cliOptions.mqtt
-		if moduleCommandRequiresExclusiveControlPanel(moduleCommand) {
-			if running, ok := runningControlPanelMetadata(); ok {
-				err := fmt.Errorf("another OWLCMS Control Panel is already running (%s); use that UI or close it before running module commands", describeControlPanelRuntime(running))
-				log.Printf("ERROR: %v", err)
-				fmt.Fprintf(os.Stderr, "%v\n", err)
-				os.Exit(1)
-			}
-		}
-		if err := executeModuleCommand(moduleCommand, os.Stdout); err != nil {
+	if replFound {
+		if err := runREPL(replInvocation, replSession{}, os.Stdin, os.Stdout, os.Stderr); err != nil {
 			log.Printf("ERROR: %v", err)
 			fmt.Fprintf(os.Stderr, "%v\n", err)
 			os.Exit(1)
@@ -814,115 +810,6 @@ func setupSignalHandling() {
 	}()
 }
 
-// parseDaemonFlags scans args for --owlcms [version|latest|previous|stop|list] and --tracker [version|latest|previous|stop|list].
-// When a switch is present without a value, it defaults to "previous".
-// Returns empty strings when the flags are absent.
-func parseDaemonFlags(args []string) (owlcmsVersion, trackerVersion string) {
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--owlcms":
-			owlcmsVersion = "previous"
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++
-				owlcmsVersion = args[i]
-			}
-		case "--tracker":
-			trackerVersion = "previous"
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++
-				trackerVersion = args[i]
-			}
-		}
-	}
-	return
-}
-
-func isListVerb(value string) bool {
-	return strings.EqualFold(strings.TrimSpace(value), "list")
-}
-
-func writeAvailableVersions(out io.Writer, label string, versions []string) {
-	fmt.Fprintf(out, "%s available versions:\n", label)
-	if len(versions) == 0 {
-		fmt.Fprintln(out, "  (none installed)")
-		return
-	}
-	for _, version := range versions {
-		fmt.Fprintf(out, "  %s\n", version)
-	}
-}
-
-func handleHeadlessListRequests(out io.Writer, owlcmsRequest, trackerRequest string) (string, string, bool) {
-	var listed bool
-
-	if isListVerb(owlcmsRequest) {
-		writeAvailableVersions(out, "owlcms", owlcms.GetAllInstalledVersions())
-		owlcmsRequest = ""
-		listed = true
-	}
-	if isListVerb(trackerRequest) {
-		writeAvailableVersions(out, "tracker", tracker.GetAllInstalledVersions())
-		trackerRequest = ""
-		listed = true
-	}
-
-	return owlcmsRequest, trackerRequest, listed
-}
-
-// resolveVersion turns "latest" into the highest semver-installed directory name,
-// or validates that the given version directory exists.  installDir is the module's
-// install root and allVersions is the semver-descending list from GetAllInstalledVersions.
-func resolveVersion(label, requested string, allVersions []string, installDir string, getLastRunVersion func() string) (string, error) {
-	if len(allVersions) == 0 {
-		return "", fmt.Errorf("no installed %s versions found", label)
-	}
-	if strings.EqualFold(requested, "latest") {
-		v := allVersions[0] // already sorted by semver descending
-		log.Printf("Resolved %s 'latest' to %s", label, v)
-		return v, nil
-	}
-
-	if strings.EqualFold(requested, "previous") {
-		prev := getLastRunVersion()
-		if prev == "" {
-			v := allVersions[0]
-			log.Printf("No previous %s version recorded, falling back to latest: %s", label, v)
-			return v, nil
-		}
-		dir := filepath.Join(installDir, prev)
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			v := allVersions[0]
-			log.Printf("Previous %s version %q no longer installed, falling back to latest: %s", label, prev, v)
-			return v, nil
-		}
-		log.Printf("Resolved %s 'previous' to %s", label, prev)
-		return prev, nil
-	}
-
-	// Check the requested version exists as a directory
-	dir := filepath.Join(installDir, requested)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return "", fmt.Errorf("%s version %q is not installed (directory %s not found)", label, requested, dir)
-	}
-	return requested, nil
-}
-
-func configureTrackerConnectionForHeadlessTandem(owlcmsVersion, trackerVersion string) error {
-	trackerPort := strings.TrimSpace(tracker.GetPortForRelease(trackerVersion))
-	if trackerPort == "" {
-		return fmt.Errorf("selected tracker version %q has no configured port", trackerVersion)
-	}
-	trackerHost := "127.0.0.1"
-	trackerURL := fmt.Sprintf("ws://%s/ws", trackerHost)
-	if err := owlcms.ConfigureTrackerConnectionForReleaseURL(owlcmsVersion, trackerURL, trackerPort); err != nil {
-		return err
-	}
-	trackerURL = fmt.Sprintf("ws://%s:%s/ws", trackerHost, trackerPort)
-	log.Printf("Configured OWLCMS %s to connect to Tracker %s using host=%s port=%s url=%s; updated %s",
-		owlcmsVersion, trackerVersion, trackerHost, trackerPort, trackerURL, owlcms.GetReleaseEnvPath(owlcmsVersion))
-	return nil
-}
-
 type runningModuleProcess struct {
 	Label        string
 	Version      string
@@ -968,7 +855,7 @@ func resolveRunningModuleProcess(label, metadataPath, pidFilePath, port, fallbac
 }
 
 // stopHeadlessDaemons stops running OWLCMS and/or Tracker modules from the command line.
-func stopHeadlessDaemons(stopOwlcms, stopTracker bool) {
+func stopHeadlessDaemons(stopOwlcms, stopTracker bool) error {
 	var failed bool
 
 	if stopOwlcms {
@@ -992,8 +879,9 @@ func stopHeadlessDaemons(stopOwlcms, stopTracker bool) {
 	}
 
 	if failed {
-		os.Exit(1)
+		return fmt.Errorf("failed to stop one or more modules")
 	}
+	return nil
 }
 
 // stopOneModule stops a single module identified by runtime metadata, PID file, or configured port.

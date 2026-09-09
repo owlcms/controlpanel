@@ -329,7 +329,7 @@ func recordOwlcmsStart(pid int, version, port string, daemon bool) *shared.Runti
 	return metadata
 }
 
-// SaveLastRunVersion persists the version so that --owlcms previous can find it.
+// SaveLastRunVersion persists the version selected for the last launch.
 func SaveLastRunVersion(version string) {
 	p := filepath.Join(installDir, "last-version.txt")
 	if err := os.WriteFile(p, []byte(version), 0644); err != nil {
@@ -351,11 +351,11 @@ func GetLastRunVersion() string {
 // Under systemd it stays in the foreground, waits on the process, and restarts
 // on non-zero exit (same supervision as the interactive launcher).
 // Otherwise it detaches the child and returns once the port is ready.
-func LaunchDaemon(version string, enableEmbeddedMQTT bool) error {
+func LaunchDaemon(version string) error {
 	log.Printf("LaunchDaemon: starting OWLCMS %s headlessly (systemd=%v, INVOCATION_ID=%q)",
 		version, shared.IsRunningUnderSystemd(), os.Getenv("INVOCATION_ID"))
 
-	params, err := prepareOwlcmsLaunch(version, &enableEmbeddedMQTT)
+	params, err := prepareOwlcmsLaunch(version, nil)
 	if err != nil {
 		return err
 	}
@@ -378,9 +378,9 @@ func LaunchDaemon(version string, enableEmbeddedMQTT bool) error {
 }
 
 // LaunchForeground starts OWLCMS from the command line and blocks until it exits.
-func LaunchForeground(version string, enableEmbeddedMQTT bool) error {
+func LaunchForeground(version string) error {
 	log.Printf("LaunchForeground: starting OWLCMS %s", version)
-	params, err := prepareOwlcmsLaunch(version, &enableEmbeddedMQTT)
+	params, err := prepareOwlcmsLaunch(version, nil)
 	if err != nil {
 		return err
 	}

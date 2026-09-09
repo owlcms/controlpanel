@@ -174,7 +174,7 @@ func recordTrackerStart(pid int, version, port string, daemon bool) *shared.Runt
 	return metadata
 }
 
-// SaveLastRunVersion persists the version so that --tracker previous can find it.
+// SaveLastRunVersion persists the version selected for the last launch.
 func SaveLastRunVersion(version string) {
 	p := filepath.Join(installDir, "last-version.txt")
 	if err := os.WriteFile(p, []byte(version), 0644); err != nil {

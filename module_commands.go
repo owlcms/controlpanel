@@ -17,192 +17,23 @@ import (
 )
 
 type moduleCLICommand struct {
-	Module           string
-	Action           string
-	Version          string
-	InstallVersion   string
-	InstallZipPath   string
-	CreateZipPath    string
-	UpdateTo         string
-	DuplicateName    string
-	FromVersion      string
-	ToVersion        string
-	RemoveVersion    string
-	Port             string
-	LocalTrackerPort string
-	DaemonMode       bool
-	MQTT             bool
+	Module         string
+	Action         string
+	Version        string
+	InstallVersion string
+	InstallZipPath string
+	CreateZipPath  string
+	UpdateTo       string
+	DuplicateName  string
+	FromVersion    string
+	ToVersion      string
+	RemoveVersion  string
+	Port           string
+	DaemonMode     bool
 }
 
 func moduleCommandRequiresExclusiveControlPanel(cmd moduleCLICommand) bool {
-	return cmd.Action != "list" && cmd.Action != "stop" && cmd.Action != "launch"
-}
-
-func parseModuleCommand(args []string) (moduleCLICommand, bool, error) {
-	var cmd moduleCLICommand
-	var sawModule bool
-	var sawModuleAction bool
-
-	setAction := func(action string) error {
-		if cmd.Action != "" && cmd.Action != action {
-			return fmt.Errorf("only one module action can be specified (got %s and %s)", cmd.Action, action)
-		}
-		cmd.Action = action
-		sawModuleAction = true
-		return nil
-	}
-
-	valueAfter := func(index int, flag string) (string, int, error) {
-		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "-") {
-			return "", index, fmt.Errorf("%s requires a value", flag)
-		}
-		return strings.TrimSpace(args[index+1]), index + 1, nil
-	}
-
-	optionalValueAfter := func(index int, fallback string) (string, int) {
-		if index+1 < len(args) && !strings.HasPrefix(args[index+1], "-") {
-			return strings.TrimSpace(args[index+1]), index + 1
-		}
-		return fallback, index
-	}
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--owlcms", "--tracker":
-			return cmd, true, fmt.Errorf("%s is not supported by the command-line guide; use --module %s with an explicit action", args[i], strings.TrimPrefix(args[i], "--"))
-		case "-m", "--module":
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.Module = strings.ToLower(value)
-			sawModule = true
-			i = next
-		case "--launch":
-			if err := setAction("launch"); err != nil {
-				return cmd, true, err
-			}
-		case "--stop":
-			if err := setAction("stop"); err != nil {
-				return cmd, true, err
-			}
-		case "--list":
-			if err := setAction("list"); err != nil {
-				return cmd, true, err
-			}
-		case "--install":
-			if err := setAction("install"); err != nil {
-				return cmd, true, err
-			}
-			cmd.InstallVersion, i = optionalValueAfter(i, "latest")
-		case "--install-zip":
-			if err := setAction("install-zip"); err != nil {
-				return cmd, true, err
-			}
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.InstallZipPath = value
-			i = next
-		case "--create-zip":
-			if err := setAction("create-zip"); err != nil {
-				return cmd, true, err
-			}
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.CreateZipPath = value
-			i = next
-		case "--update-to":
-			if err := setAction("update"); err != nil {
-				return cmd, true, err
-			}
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.UpdateTo = value
-			i = next
-		case "--duplicate":
-			if err := setAction("duplicate"); err != nil {
-				return cmd, true, err
-			}
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.DuplicateName = value
-			i = next
-		case "--import":
-			if err := setAction("import"); err != nil {
-				return cmd, true, err
-			}
-		case "--remove":
-			if err := setAction("remove"); err != nil {
-				return cmd, true, err
-			}
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.RemoveVersion = value
-			i = next
-		case "--version":
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.Version = value
-			i = next
-		case "--from-version":
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.FromVersion = value
-			i = next
-		case "--to-version":
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.ToVersion = value
-			i = next
-		case "--port":
-			value, next, err := valueAfter(i, args[i])
-			if err != nil {
-				return cmd, true, err
-			}
-			cmd.Port = value
-			i = next
-		case "--local-tracker":
-			cmd.LocalTrackerPort, i = optionalValueAfter(i, "8096")
-		case "--background":
-			cmd.DaemonMode = true
-		case "--mqtt":
-			cmd.MQTT = true
-		}
-	}
-
-	if !sawModule && !sawModuleAction {
-		return cmd, false, nil
-	}
-	if !sawModule {
-		return cmd, true, fmt.Errorf("module actions require --module owlcms or --module tracker")
-	}
-	if cmd.Module != "owlcms" && cmd.Module != "tracker" {
-		return cmd, true, fmt.Errorf("unsupported module %q", cmd.Module)
-	}
-	if cmd.Action == "" {
-		return cmd, true, fmt.Errorf("--module %s requires an action", cmd.Module)
-	}
-	if cmd.LocalTrackerPort != "" && cmd.Module != "owlcms" {
-		return cmd, true, fmt.Errorf("--local-tracker can only be used with --module owlcms")
-	}
-
-	return cmd, true, nil
+	return cmd.Action != "list" && cmd.Action != "stop" && cmd.Action != "status" && cmd.Action != "launch"
 }
 
 func defaultVersion(requested string) string {
@@ -273,16 +104,10 @@ func installedVersionDirectories(installDir string) []string {
 
 func executeModuleCommand(cmd moduleCLICommand, out io.Writer) error {
 	switch cmd.Action {
-	case "list":
-		if cmd.Module == "owlcms" {
-			writeAvailableVersions(out, "owlcms", installedVersionDirectories(owlcms.GetInstallDir()))
-		} else {
-			writeAvailableVersions(out, "tracker", installedVersionDirectories(tracker.GetInstallDir()))
-		}
-		return nil
 	case "stop":
-		stopHeadlessDaemons(cmd.Module == "owlcms", cmd.Module == "tracker")
-		return nil
+		return stopHeadlessDaemons(cmd.Module == "owlcms", cmd.Module == "tracker")
+	case "status":
+		return executeModuleStatus(cmd, out)
 	case "launch":
 		return executeModuleLaunch(cmd, out)
 	case "install":
@@ -293,6 +118,8 @@ func executeModuleCommand(cmd moduleCLICommand, out io.Writer) error {
 		return executeModuleCreateZip(cmd, out)
 	case "update":
 		return executeModuleUpdate(cmd, out)
+	case "rename":
+		return executeModuleRename(cmd, out)
 	case "duplicate":
 		return executeModuleDuplicate(cmd, out)
 	case "import":
@@ -302,6 +129,37 @@ func executeModuleCommand(cmd moduleCLICommand, out io.Writer) error {
 	default:
 		return fmt.Errorf("unsupported action %q", cmd.Action)
 	}
+}
+
+func executeModuleStatus(cmd moduleCLICommand, out io.Writer) error {
+	if cmd.Module == "owlcms" {
+		if err := owlcms.InitEnv(); err != nil {
+			return fmt.Errorf("load owlcms environment: %w", err)
+		}
+		running, err := resolveRunningModuleProcess("owlcms", owlcms.RuntimeMetadataPath(), owlcms.PIDFilePath(), owlcms.GetPort(), owlcms.GetLastRunVersion())
+		if err != nil {
+			return err
+		}
+		writeModuleStatus(out, running)
+		return nil
+	}
+	if err := tracker.InitEnv(); err != nil {
+		return fmt.Errorf("load tracker environment: %w", err)
+	}
+	running, err := resolveRunningModuleProcess("tracker", tracker.RuntimeMetadataPath(), tracker.PIDFilePath(), tracker.GetPort(), tracker.GetLastRunVersion())
+	if err != nil {
+		return err
+	}
+	writeModuleStatus(out, running)
+	return nil
+}
+
+func writeModuleStatus(out io.Writer, running *runningModuleProcess) {
+	if running == nil {
+		fmt.Fprintln(out, "not running")
+		return
+	}
+	fmt.Fprintf(out, "%s %s running (PID %d, port %s, %s)\n", running.Label, running.Version, running.PID, running.Port, running.Source)
 }
 
 func executeModuleLaunch(cmd moduleCLICommand, out io.Writer) error {
@@ -318,18 +176,12 @@ func executeModuleLaunch(cmd moduleCLICommand, out io.Writer) error {
 			return err
 		}
 	}
-	if cmd.LocalTrackerPort != "" {
-		if err := owlcms.ConfigureTrackerConnectionForRelease(version, cmd.LocalTrackerPort); err != nil {
-			return err
-		}
-	}
-
 	if cmd.DaemonMode {
 		if err := shared.SetRunAsDaemonEnabled(true); err != nil {
 			return err
 		}
 		if cmd.Module == "owlcms" {
-			if err := owlcms.LaunchDaemon(version, cmd.MQTT); err != nil {
+			if err := owlcms.LaunchDaemon(version); err != nil {
 				return err
 			}
 		} else if err := tracker.LaunchDaemon(version); err != nil {
@@ -340,7 +192,7 @@ func executeModuleLaunch(cmd moduleCLICommand, out io.Writer) error {
 	}
 
 	if cmd.Module == "owlcms" {
-		return owlcms.LaunchForeground(version, cmd.MQTT)
+		return owlcms.LaunchForeground(version)
 	}
 	return tracker.LaunchForeground(version)
 }
@@ -374,7 +226,7 @@ func executeModuleInstall(cmd moduleCLICommand, out io.Writer) error {
 func executeModuleInstallZip(cmd moduleCLICommand, out io.Writer) error {
 	zipPath := strings.TrimSpace(cmd.InstallZipPath)
 	if zipPath == "" {
-		return fmt.Errorf("--install-zip requires a ZIP file path")
+		return fmt.Errorf("install-zip requires a ZIP file path")
 	}
 
 	version, err := installZipVersion(zipPath, cmd.Version)
@@ -414,12 +266,12 @@ func installZipVersion(zipPath, requestedVersion string) (string, error) {
 	if version == "" {
 		inferred, err := shared.ExtractVersionFromFilename(filepath.Base(zipPath))
 		if err != nil {
-			return "", fmt.Errorf("--install-zip requires --version when the ZIP filename does not contain a semantic version: %w", err)
+			return "", fmt.Errorf("install-zip requires an installed version when the ZIP filename does not contain a semantic version: %w", err)
 		}
 		version = inferred
 	}
 	if strings.EqualFold(version, "latest") || strings.EqualFold(version, "previous") {
-		return "", fmt.Errorf("--install-zip --version must be the installed version name, not %q", version)
+		return "", fmt.Errorf("install-zip installed version must be a semantic version, not %q", version)
 	}
 	if err := shared.ValidateVersionName(version); err != nil {
 		return "", fmt.Errorf("invalid install ZIP version %q: %w", version, err)
@@ -458,7 +310,7 @@ func extractLocalZipArchive(zipPath, extractPath, scratchDir string, extract fun
 func executeModuleCreateZip(cmd moduleCLICommand, out io.Writer) error {
 	zipPath := strings.TrimSpace(cmd.CreateZipPath)
 	if zipPath == "" {
-		return fmt.Errorf("--create-zip requires an output ZIP path")
+		return fmt.Errorf("export requires an output ZIP path")
 	}
 
 	version, err := resolveLocalModuleVersion(cmd.Module, cmd.Version)
@@ -508,7 +360,7 @@ func resolveCreateZipPath(module, version, requestedPath string) (string, error)
 		return "", fmt.Errorf("checking ZIP output path %s: %w", requestedPath, err)
 	}
 	if !strings.EqualFold(filepath.Ext(requestedPath), ".zip") {
-		return "", fmt.Errorf("--create-zip output must be a .zip file or an existing directory: %s", requestedPath)
+		return "", fmt.Errorf("export output must be a .zip file or an existing directory: %s", requestedPath)
 	}
 	return requestedPath, nil
 }
@@ -571,9 +423,22 @@ func executeModuleUpdate(cmd moduleCLICommand, out io.Writer) error {
 	return nil
 }
 
+func executeModuleRename(cmd moduleCLICommand, out io.Writer) error {
+	version, err := resolveLocalModuleVersion(cmd.Module, cmd.Version)
+	if err != nil {
+		return err
+	}
+	newVersion, err := shared.RenameVersion(moduleInstallDir(cmd.Module), version, cmd.DuplicateName)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s %s renamed to %s\n", cmd.Module, version, newVersion)
+	return nil
+}
+
 func executeModuleDuplicate(cmd moduleCLICommand, out io.Writer) error {
 	if strings.TrimSpace(cmd.FromVersion) == "" {
-		return fmt.Errorf("--duplicate requires --from-version")
+		return fmt.Errorf("duplicate requires a source version")
 	}
 	fromVersion, err := resolveLocalModuleVersion(cmd.Module, cmd.FromVersion)
 	if err != nil {
@@ -597,7 +462,7 @@ func executeModuleDuplicate(cmd moduleCLICommand, out io.Writer) error {
 
 func executeModuleImport(cmd moduleCLICommand, out io.Writer) error {
 	if strings.TrimSpace(cmd.FromVersion) == "" || strings.TrimSpace(cmd.ToVersion) == "" {
-		return fmt.Errorf("--import requires --from-version and --to-version")
+		return fmt.Errorf("import requires source and target versions")
 	}
 	fromVersion, err := resolveLocalModuleVersion(cmd.Module, cmd.FromVersion)
 	if err != nil {
