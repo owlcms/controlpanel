@@ -1,0 +1,76 @@
+{
+  "windows": {
+    "revision": "1",
+    "allowSystemFallback": true,
+    "version": "master-latest",
+    "directory": "ffmpeg-master-latest-win64-gpl-shared",
+    "archiveRoot": "ffmpeg-master-latest-win64-gpl-shared",
+    "executables": ["ffmpeg.exe", "ffprobe.exe", "ffplay.exe"],
+    "archives": [{
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip",
+      "format": "zip",
+      "destination": ".",
+      "rolling": true
+    }]
+  },
+  "linux-amd64": {
+    "revision": "1",
+    "allowSystemFallback": true,
+    "version": "master-latest",
+    "directory": "ffmpeg-master-latest-linux64-gpl-shared",
+    "archiveRoot": "ffmpeg-master-latest-linux64-gpl-shared",
+    "executables": ["ffmpeg", "ffprobe", "ffplay"],
+    "requiredDirectories": ["lib"],
+    "libraryPathDirectories": ["lib"],
+    "archives": [{
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl-shared.tar.xz",
+      "format": "tar.xz",
+      "destination": ".",
+      "rolling": true
+    }]
+  },
+  "linux-arm64": {
+    "revision": "1",
+    "allowSystemFallback": true,
+    "version": "master-latest",
+    "directory": "ffmpeg-master-latest-linuxarm64-gpl-shared",
+    "archiveRoot": "ffmpeg-master-latest-linuxarm64-gpl-shared",
+    "executables": ["ffmpeg", "ffprobe", "ffplay"],
+    "requiredDirectories": ["lib"],
+    "libraryPathDirectories": ["lib"],
+    "archives": [{
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl-shared.tar.xz",
+      "format": "tar.xz",
+      "destination": ".",
+      "rolling": true
+    }]
+  },
+  "darwin-amd64": {"systemOnly": true},
+  "darwin-arm64": {
+    "revision": "1",
+    "version": "N-126416-g9997fd0606",
+    "directory": "riedl-2026-09-06-N-126416-g9997fd0606",
+    "archiveRoot": ".",
+    "executables": ["ffmpeg", "ffprobe", "ffplay"],
+    "archives": [
+      {
+        "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1788701347_N-126416-g9997fd0606/ffmpeg.zip",
+        "format": "zip",
+        "destination": "bin",
+        "sha256": "64f1ad87071be6883ba8ba3fe01412baa9ae1891a50f28449e14a1280132deda"
+      },
+      {
+        "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1788701347_N-126416-g9997fd0606/ffprobe.zip",
+        "format": "zip",
+        "destination": "bin",
+        "sha256": "c068f1ea299413c7aa822efb67517bf5bc63c7684e7383ed9af5b66c55e7f728"
+      },
+      {
+        "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1788701347_N-126416-g9997fd0606/ffplay.zip",
+        "format": "zip",
+        "destination": "bin",
+        "sha256": "bd48d865c3fde411c9e0fc4dc0b125384d814d7deb4c0946ed14003b70545e02"
+      }
+    ]
+  }
+}

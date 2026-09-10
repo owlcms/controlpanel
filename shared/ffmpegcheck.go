@@ -18,16 +18,6 @@ var ErrFFmpegNotFound = errors.New("ffmpeg not found")
 
 const ffmpegDownloadPage = "https://ffmpeg.org/download.html"
 
-const (
-	// Windows FFmpeg from BtbN (shared build, same repo as Linux)
-	ffmpegWindowsBuild = "ffmpeg-master-latest-win64-gpl-shared"
-	ffmpegWindowsURL   = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/" + ffmpegWindowsBuild + ".zip"
-
-	// Linux FFmpeg from BtbN (shared builds with libraries)
-	ffmpegLinuxAmd64URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl-shared.tar.xz"
-	ffmpegLinuxArm64URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl-shared.tar.xz"
-)
-
 // GetSharedFFmpegDir returns the shared FFmpeg installation directory
 // under the control panel root, at the same level as java/ and node/.
 func GetSharedFFmpegDir() string {
@@ -37,50 +27,15 @@ func GetSharedFFmpegDir() string {
 // FindLocalFFmpeg searches for an FFmpeg executable in the shared control panel
 // directory.  Returns the full path or empty string if not found.
 func FindLocalFFmpeg() string {
-	ffmpegDir := GetSharedFFmpegDir()
-	if _, err := os.Stat(ffmpegDir); err != nil {
-		return ""
-	}
-
-	var exeName string
-	if GetGoos() == "windows" {
-		exeName = "ffmpeg.exe"
-	} else {
-		exeName = "ffmpeg"
-	}
-
-	// Archives extract into a named subdirectory (e.g. ffmpeg-7.1-full_build/).
-	// Scan for <subdir>/bin/<exeName>.
-	entries, err := os.ReadDir(ffmpegDir)
+	runtime, err := loadFFmpegRuntime(ffmpegManifestJSON, GetGoos(), GetGoarch())
 	if err != nil {
 		return ""
 	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		candidate := filepath.Join(ffmpegDir, entry.Name(), "bin", exeName)
-		if _, err := os.Stat(candidate); err == nil {
-			// For Linux shared builds verify lib/ exists next to bin/
-			if GetGoos() == "linux" {
-				libDir := filepath.Join(ffmpegDir, entry.Name(), "lib")
-				if st, err := os.Stat(libDir); err != nil || !st.IsDir() {
-					continue
-				}
-			}
-			log.Printf("Found shared FFmpeg at: %s", candidate)
-			return candidate
-		}
+	result, err := installedFFmpegRuntime(runtime, filepath.Join(GetSharedFFmpegDir(), runtime.Directory))
+	if err != nil {
+		return ""
 	}
-
-	// Also check bin/ directly under ffmpegDir (flat layout)
-	directCandidate := filepath.Join(ffmpegDir, "bin", exeName)
-	if _, err := os.Stat(directCandidate); err == nil {
-		return directCandidate
-	}
-
-	return ""
+	return result
 }
 
 // systemFFmpegSearchDirs lists well-known package manager install locations.
@@ -128,6 +83,13 @@ func FindFFmpeg() string {
 	if local := FindLocalFFmpeg(); local != "" {
 		return local
 	}
+	runtime, err := loadFFmpegRuntime(ffmpegManifestJSON, GetGoos(), GetGoarch())
+	if err == nil && !runtime.AllowSystemFallback {
+		return ""
+	}
+	if err != nil && !errors.Is(err, errFFmpegSystemOnly) {
+		return ""
+	}
 	return FindSystemFFmpeg()
 }
 
@@ -136,7 +98,7 @@ func FindFFmpeg() string {
 func ffmpegMissingMarkdown() string {
 	if GetGoos() == "darwin" {
 		return "### FFmpeg not found\n\n" +
-			"The video modules need FFmpeg, which is not bundled on macOS. Install it either way:\n\n" +
+			"The video modules need FFmpeg. Intel Macs use a system installation:\n\n" +
 			"- Use an installer from the [FFmpeg download page](" + ffmpegDownloadPage + ")\n" +
 			"- Run `brew install ffmpeg` if you have [Homebrew](https://brew.sh)\n\n" +
 			"Then restart the control panel.\n"
@@ -166,81 +128,21 @@ func ShowFFmpegError(err error, w fyne.Window) {
 
 // getFFmpegDownloadURL returns the download URL for the current platform.
 func getFFmpegDownloadURL() (string, error) {
-	goos := GetGoos()
-	goarch := GetGoarch()
-
-	switch goos {
-	case "windows":
-		return ffmpegWindowsURL, nil
-	case "linux":
-		switch goarch {
-		case "amd64":
-			return ffmpegLinuxAmd64URL, nil
-		case "arm64":
-			return ffmpegLinuxArm64URL, nil
-		default:
-			return "", fmt.Errorf("unsupported Linux architecture for FFmpeg: %s", goarch)
-		}
-	default:
-		return "", fmt.Errorf("unsupported OS for bundled FFmpeg: %s", goos)
+	runtime, err := loadFFmpegRuntime(ffmpegManifestJSON, GetGoos(), GetGoarch())
+	if err != nil {
+		return "", err
 	}
+	return runtime.Archives[0].URL, nil
 }
 
 // DownloadAndInstallFFmpeg downloads and installs FFmpeg to the shared
 // directory.  Returns the path to the installed ffmpeg executable.
 func DownloadAndInstallFFmpeg(progressCallback func(downloaded, total int64), cancel <-chan bool) (string, error) {
-	downloadURL, err := getFFmpegDownloadURL()
+	runtime, err := loadFFmpegRuntime(ffmpegManifestJSON, GetGoos(), GetGoarch())
 	if err != nil {
 		return "", err
 	}
-
-	ffmpegDir := GetSharedFFmpegDir()
-	if err := EnsureDir0755(ffmpegDir); err != nil {
-		return "", fmt.Errorf("creating ffmpeg directory: %w", err)
-	}
-
-	goos := GetGoos()
-	var archivePath string
-	if goos == "windows" {
-		archivePath = filepath.Join(ffmpegDir, "ffmpeg.zip")
-	} else {
-		archivePath = filepath.Join(ffmpegDir, "ffmpeg.tar.xz")
-	}
-
-	log.Printf("Downloading FFmpeg from: %s", downloadURL)
-	if err := DownloadArchive(downloadURL, archivePath, progressCallback, cancel); err != nil {
-		return "", fmt.Errorf("downloading FFmpeg: %w", err)
-	}
-
-	log.Printf("Extracting FFmpeg to: %s", ffmpegDir)
-	if goos == "windows" {
-		if err := ExtractZip(archivePath, ffmpegDir); err != nil {
-			return "", fmt.Errorf("extracting FFmpeg zip: %w", err)
-		}
-	} else {
-		if err := ExtractTarXz(archivePath, ffmpegDir); err != nil {
-			return "", fmt.Errorf("extracting FFmpeg tar.xz: %w", err)
-		}
-	}
-
-	result := FindLocalFFmpeg()
-	if result == "" {
-		return "", fmt.Errorf("FFmpeg executable not found after extraction in %s", ffmpegDir)
-	}
-
-	// Make executables +x on non-Windows
-	if goos != "windows" {
-		binDir := filepath.Dir(result)
-		for _, name := range []string{"ffmpeg", "ffprobe", "ffplay"} {
-			p := filepath.Join(binDir, name)
-			if _, statErr := os.Stat(p); statErr == nil {
-				os.Chmod(p, 0755)
-			}
-		}
-	}
-
-	log.Printf("FFmpeg installed successfully at: %s", result)
-	return result, nil
+	return installFFmpegRuntime(runtime, GetSharedFFmpegDir(), progressCallback, cancel, DownloadArchive)
 }
 
 // EnsureFFmpegPrerequisite checks for FFmpeg in the shared directory,
@@ -250,12 +152,19 @@ func DownloadAndInstallFFmpeg(progressCallback func(downloaded, total int64), ca
 // This blocks on a network download and drives a progress dialog, so it must
 // be called from a background goroutine, never from the Fyne main goroutine.
 func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
+	runtime, manifestErr := loadFFmpegRuntime(ffmpegManifestJSON, GetGoos(), GetGoarch())
+	if manifestErr != nil && !errors.Is(manifestErr, errFFmpegSystemOnly) {
+		return "", manifestErr
+	}
 	log.Println("FFmpeg check: looking for bundled FFmpeg in shared directory")
 	ffmpegDir := GetSharedFFmpegDir()
 	log.Printf("FFmpeg check: shared directory is %s", ffmpegDir)
 
 	// Already installed in the shared directory?
 	if existing := FindLocalFFmpeg(); existing != "" {
+		ffmpegInstallMu.Lock()
+		cleanupFFmpegRuntimes(ffmpegDir, filepath.Join(ffmpegDir, runtime.Directory))
+		ffmpegInstallMu.Unlock()
 		log.Printf("FFmpeg check: already installed at %s — using it", existing)
 		return existing, nil
 	}
@@ -264,6 +173,9 @@ func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
 	// Try to download our own copy first.
 	downloadURL, urlErr := getFFmpegDownloadURL()
 	if urlErr != nil {
+		if !errors.Is(urlErr, errFFmpegSystemOnly) {
+			return "", urlErr
+		}
 		// Platform not supported for bundled FFmpeg — fall back to system PATH.
 		log.Printf("FFmpeg check: cannot determine download URL (%v) — platform not supported for bundled FFmpeg", urlErr)
 		if systemFFmpeg := FindSystemFFmpeg(); systemFFmpeg != "" {
@@ -276,7 +188,7 @@ func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
 
 	log.Printf("FFmpeg check: will download bundled FFmpeg from %s", downloadURL)
 
-	cancel := make(chan bool)
+	cancel := make(chan bool, 1)
 	var progressBar *widget.ProgressBar
 	var progressDialog dialog.Dialog
 	fyne.DoAndWait(func() {
@@ -307,6 +219,9 @@ func EnsureFFmpegPrerequisite(w fyne.Window) (string, error) {
 	})
 
 	if err != nil {
+		if !runtime.AllowSystemFallback {
+			return "", fmt.Errorf("FFmpeg installation failed: %w", err)
+		}
 		// Download failed — try system PATH as last resort.
 		log.Printf("FFmpeg check: download/install failed (%v) — trying system FFmpeg as last resort", err)
 		if systemFFmpeg := FindSystemFFmpeg(); systemFFmpeg != "" {

@@ -30,15 +30,10 @@ func BuildVideoLaunchEnv(versionDir string) []string {
 	// Export the FFmpeg path so child processes find it directly.
 	if ffmpegPath := FindFFmpeg(); ffmpegPath != "" {
 		env = UpsertEnv(env, "VIDEO_FFMPEG_PATH", ffmpegPath)
-		// For Linux shared builds, prepend the bundled lib/ to LD_LIBRARY_PATH.
-		if GetGoos() == "linux" {
-			libDir := filepath.Join(filepath.Dir(filepath.Dir(ffmpegPath)), "lib")
-			if st, err := os.Stat(libDir); err == nil && st.IsDir() {
-				if existing := os.Getenv("LD_LIBRARY_PATH"); existing != "" {
-					env = UpsertEnv(env, "LD_LIBRARY_PATH", fmt.Sprintf("%s:%s", libDir, existing))
-				} else {
-					env = UpsertEnv(env, "LD_LIBRARY_PATH", libDir)
-				}
+		if runtime, err := loadFFmpegRuntime(ffmpegManifestJSON, GetGoos(), GetGoarch()); err == nil {
+			root := filepath.Join(GetSharedFFmpegDir(), runtime.Directory)
+			if ffmpegPath == filepath.Join(root, "bin", runtime.Executables[0]) {
+				env = ffmpegLibraryEnv(env, runtime, root)
 			}
 		}
 	}
@@ -50,6 +45,23 @@ func BuildVideoLaunchEnv(versionDir string) []string {
 	}
 
 	return env
+}
+
+func ffmpegLibraryEnv(env []string, runtime ffmpegRuntime, root string) []string {
+	if len(runtime.LibraryPathDirectories) == 0 {
+		return env
+	}
+	directories := make([]string, 0, len(runtime.LibraryPathDirectories)+1)
+	for _, directory := range runtime.LibraryPathDirectories {
+		directories = append(directories, filepath.Join(root, directory))
+	}
+	for _, entry := range env {
+		if existing, ok := strings.CutPrefix(entry, "LD_LIBRARY_PATH="); ok && existing != "" {
+			directories = append(directories, existing)
+			break
+		}
+	}
+	return UpsertEnv(env, "LD_LIBRARY_PATH", strings.Join(directories, string(os.PathListSeparator)))
 }
 
 // ShouldRunVideoExtract determines whether launchers should run --extractConfig preflight.

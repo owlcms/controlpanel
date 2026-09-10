@@ -59,3 +59,39 @@ func lookupEnvValue(env []string, key string) string {
 	}
 	return ""
 }
+
+func TestFFmpegLibraryEnv(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		for _, existing := range []string{"", "/existing/lib:/other/lib"} {
+			runtime := ffmpegRuntime{}
+			if configured {
+				runtime.LibraryPathDirectories = []string{"lib", "extra/lib"}
+			}
+			root := t.TempDir()
+			if err := os.Mkdir(filepath.Join(root, "lib"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			env := []string{"UNCHANGED=value"}
+			if existing != "" {
+				env = append(env, "LD_LIBRARY_PATH="+existing)
+			}
+			result := ffmpegLibraryEnv(env, runtime, root)
+			expected := existing
+			if configured {
+				expected = filepath.Join(root, "lib") + string(os.PathListSeparator) + filepath.Join(root, "extra/lib")
+				if existing != "" {
+					expected += string(os.PathListSeparator) + existing
+				}
+			}
+			if got := lookupEnvValue(result, "LD_LIBRARY_PATH"); got != expected {
+				t.Fatalf("configured=%v: got %q, want %q", configured, got, expected)
+			}
+			if !configured && len(result) != len(env) {
+				t.Fatal("undeclared paths changed environment")
+			}
+			if lookupEnvValue(result, "UNCHANGED") != "value" {
+				t.Fatal("unrelated environment changed")
+			}
+		}
+	}
+}
