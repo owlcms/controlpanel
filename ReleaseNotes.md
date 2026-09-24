@@ -15,6 +15,7 @@ The control panel is installed once. It will automatically download the correct 
   - this starts a text-based interactive command loop used when running OWLCMS or tracker on a Linux server with no GUI.
   - inside you can type `owlcms help` or `tracker help` to get the commands.  The commands mirror the GUI menus.
   - controlpanel --init creates the environment same as starting the GUI.
+- packaging: fix macOS camera permission issues when running from an icon as opposed to Terminal.
 
 ### 3.6.0
 
