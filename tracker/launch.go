@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/gofrs/flock"
+	"github.com/magiconair/properties"
 )
 
 func configureTailLogLink(version, appDir string) {
@@ -77,6 +78,8 @@ type trackerLaunchParams struct {
 	RequiredNodeVer string
 	TargetPort      string
 	Env             []string
+	// KeyWarning is set when the saved shared key could not be used.
+	KeyWarning string
 }
 
 // prepareTrackerLaunch resolves paths, verifies the startup script, loads the
@@ -130,14 +133,15 @@ func prepareTrackerLaunch(version string) (*trackerLaunchParams, error) {
 	env = shared.UpsertEnv(env, "PORT", targetPort)
 	if environment != nil {
 		for _, key := range environment.Keys() {
-			value, _ := environment.Get(key)
-			log.Printf("   %s=%s", key, value)
-			if key == "TRACKER_PORT" {
+			if key == "TRACKER_PORT" || key == sharedKeyEnv {
 				continue
 			}
+			value, _ := environment.Get(key)
+			log.Printf("   %s=%s", key, value)
 			env = append(env, fmt.Sprintf("%s=%s", key, value))
 		}
 	}
+	env, keyWarning := applySharedKeyToEnv(env, environment, version)
 
 	var requiredNodeVersion string
 	if environment != nil {
@@ -153,7 +157,32 @@ func prepareTrackerLaunch(version string) (*trackerLaunchParams, error) {
 		RequiredNodeVer: requiredNodeVersion,
 		TargetPort:      targetPort,
 		Env:             env,
+		KeyWarning:      keyWarning,
 	}, nil
+}
+
+// applySharedKeyToEnv passes the decrypted shared key to Tracker as OWLCMS_UPDATEKEY; the process environment wins if already set.
+func applySharedKeyToEnv(env []string, props *properties.Properties, version string) ([]string, string) {
+	for _, entry := range env {
+		if strings.HasPrefix(entry, sharedKeyEnv+"=") {
+			return env, ""
+		}
+	}
+	if props == nil {
+		return env, ""
+	}
+	value, _ := props.Get(sharedKeyEnv)
+	if !shared.IsSecretSet(value) {
+		return env, ""
+	}
+	plain, err := shared.DecryptSecret(value)
+	if err != nil {
+		warning := fmt.Sprintf("The Tracker shared key for version %s must be re-entered (Options > Shared Key): %v", version, err)
+		log.Print(warning)
+		return env, warning
+	}
+	log.Printf("   %s=(set)", sharedKeyEnv)
+	return shared.UpsertEnv(env, sharedKeyEnv, plain), ""
 }
 
 // recordTrackerStart writes the PID file and runtime metadata after a successful cmd.Start().
@@ -204,6 +233,9 @@ func LaunchDaemon(version string) error {
 	params, err := prepareTrackerLaunch(version)
 	if err != nil {
 		return err
+	}
+	if params.KeyWarning != "" {
+		fmt.Fprintln(os.Stderr, params.KeyWarning)
 	}
 
 	if shared.CheckPort(params.TargetPort) == nil {
@@ -274,6 +306,9 @@ func LaunchForeground(version string) error {
 	params, err := prepareTrackerLaunch(version)
 	if err != nil {
 		return err
+	}
+	if params.KeyWarning != "" {
+		fmt.Fprintln(os.Stderr, params.KeyWarning)
 	}
 	if shared.CheckPort(params.TargetPort) == nil {
 		log.Printf("LaunchForeground: port %s is in use, attempting to free it...", params.TargetPort)
@@ -485,6 +520,9 @@ func continueTrackerLaunch(version, targetPort string, launchButton, stopBtn *wi
 		launchButton.Show()
 		goBackToMainScreen()
 		return
+	}
+	if params.KeyWarning != "" {
+		dialog.ShowInformation("Tracker Shared Key", params.KeyWarning, mainWindow)
 	}
 	targetPort = params.TargetPort
 

@@ -209,6 +209,9 @@ func createVersionOptionsButton(w fyne.Window, version string, buttonContainer *
 		fyne.NewMenuItem("Port Number", func() {
 			showPortNumberDialogForVersion(w, version)
 		}),
+		fyne.NewMenuItem("Shared Key", func() {
+			showSharedKeyDialog(w, version)
+		}),
 	}
 
 	buttonContainer.Add(container.NewPadded(shared.CreateMenuButton("Options", menuItems)))

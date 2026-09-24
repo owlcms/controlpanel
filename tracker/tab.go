@@ -290,7 +290,103 @@ func createOptionsMenu(w fyne.Window) *widget.Button {
 	setPortItem := fyne.NewMenuItem("Default Tracker Port", func() {
 		showPortNumberDialog(w)
 	})
-	return shared.CreateMenuButton("Options", []*fyne.MenuItem{setPortItem})
+	sharedKeyItem := fyne.NewMenuItem("Default Shared Key", func() {
+		showSharedKeyDialog(w, "")
+	})
+	return shared.CreateMenuButton("Options", []*fyne.MenuItem{setPortItem, sharedKeyItem})
+}
+
+// showSharedKeyDialog edits the default key when version is empty, otherwise the key of that version.
+func showSharedKeyDialog(w fyne.Window, version string) {
+	var keyEntry *widget.Entry
+	var keyRow fyne.CanvasObject
+	var keyOverride *shared.SharedKeyOverride
+	var enabledCheck *widget.Check
+	var extra []fyne.CanvasObject
+	title := "Default Tracker Shared Key"
+	scope := "New Tracker versions"
+	if version == "" {
+		savedKey, loadErr := GetDefaultSharedKey()
+		var keyNotice *widget.Label
+		keyEntry, keyRow, keyNotice = shared.NewClearableSharedKeyField(savedKey, loadErr, "default Tracker")
+		keyEntry.SetPlaceHolder("optional")
+		enabledCheck = widget.NewCheck("Use default key on new Tracker versions", nil)
+		enabledCheck.SetChecked(GetDefaultSharedKeyEnabled())
+		extra = []fyne.CanvasObject{keyNotice}
+	} else {
+		title = "Tracker Shared Key"
+		scope = "Version " + version
+		ownKey, hasOwnKey, ownKeyErr := GetOwnSharedKeyForRelease(version)
+		defaultKey, _ := GetDefaultSharedKey()
+		keyOverride = shared.NewSharedKeyOverride(ownKey, hasOwnKey, ownKeyErr, defaultKey, "Tracker "+version)
+		keyEntry = keyOverride.Entry
+		keyRow = keyOverride.Row
+		extra = []fyne.CanvasObject{keyOverride.Status, keyOverride.Notice}
+	}
+	help := widget.NewLabel("")
+	help.Wrapping = fyne.TextWrapWord
+	updateHelp := func() {
+		effectiveKey := keyEntry.Text
+		if keyOverride != nil {
+			effectiveKey = keyOverride.EffectiveKey()
+		} else if !enabledCheck.Checked {
+			effectiveKey = ""
+		}
+		if shared.IsSecretSet(effectiveKey) {
+			help.SetText(scope + " will only accept OWLCMS connections that send this key. In the OWLCMS tab, enter the same key under Options > Tracker Connection. Use Clear Key to accept connections without a key.")
+		} else {
+			help.SetText("The key is empty: " + scope + " will accept any connection, no matter what key is sent.")
+		}
+	}
+	if keyOverride != nil {
+		keyOverride.OnStateChanged = updateHelp
+	} else {
+		keyEntry.OnChanged = func(string) { updateHelp() }
+		enabledCheck.OnChanged = func(bool) { updateHelp() }
+	}
+	updateHelp()
+
+	content := container.NewVBox()
+	if enabledCheck != nil {
+		content.Add(enabledCheck)
+	}
+	content.Add(widget.NewForm(widget.NewFormItem("Shared Key", keyRow)))
+	for _, object := range extra {
+		content.Add(object)
+	}
+	content.Add(help)
+
+	d := dialog.NewCustomConfirm(
+		title,
+		"Save",
+		"Cancel",
+		content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			var err error
+			switch {
+			case version == "":
+				err = SaveDefaultSharedKey(keyEntry.Text)
+				if err == nil {
+					err = SaveDefaultSharedKeyEnabled(enabledCheck.Checked)
+				}
+			case keyOverride.UseDefault():
+				err = UseDefaultSharedKeyForRelease(version)
+			default:
+				err = SaveSharedKeyForRelease(version, keyEntry.Text)
+			}
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("failed to save tracker shared key: %w", err), w)
+				return
+			}
+			dialog.ShowInformation(title, "Shared key saved. Restart Tracker to apply the change.", w)
+		},
+		w,
+	)
+	d.Resize(fyne.NewSize(520, 240))
+	d.Show()
 }
 
 func installVersionFromZip(w fyne.Window) {

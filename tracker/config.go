@@ -16,6 +16,111 @@ var (
 	environment *properties.Properties
 )
 
+// sharedKeyEnv is the key Tracker expects OWLCMS to send (OWLCMS sends its OWLCMS_VIDEODATAKEY value).
+const sharedKeyEnv = "OWLCMS_UPDATEKEY"
+
+const sharedKeyDefaultEnabledKey = "CONTROLPANEL_TRACKER_SHAREDKEY_ENABLED_BY_DEFAULT"
+
+// GetDefaultSharedKeyEnabled reports whether new Tracker versions copy the default key; unset means yes (earlier behavior).
+func GetDefaultSharedKeyEnabled() bool {
+	if err := InitEnv(); err != nil {
+		return true
+	}
+	value, ok := environment.Get(sharedKeyDefaultEnabledKey)
+	if !ok {
+		return true
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
+// SaveDefaultSharedKeyEnabled sets whether new Tracker versions copy the default key.
+func SaveDefaultSharedKeyEnabled(enabled bool) error {
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	return SaveProperty(sharedKeyDefaultEnabledKey, value)
+}
+
+// SaveDefaultSharedKey stores the key inherited by Tracker versions that do not set their own; a blank key is saved as an empty value.
+func SaveDefaultSharedKey(key string) error {
+	encrypted, err := shared.EncryptSecret(key)
+	if err != nil {
+		return fmt.Errorf("encrypting tracker shared key: %w", err)
+	}
+	return SaveProperty(sharedKeyEnv, encrypted)
+}
+
+// SaveSharedKeyForRelease stores the key for one Tracker version; a blank key is saved as an empty value.
+func SaveSharedKeyForRelease(releaseVersion, key string) error {
+	encrypted, err := shared.EncryptSecret(key)
+	if err != nil {
+		return fmt.Errorf("encrypting tracker shared key: %w", err)
+	}
+	return SavePropertyForRelease(releaseVersion, sharedKeyEnv, encrypted)
+}
+
+// GetDefaultSharedKey returns the decrypted default key, or "" when none is set.
+func GetDefaultSharedKey() (string, error) {
+	if err := InitEnv(); err != nil {
+		return "", err
+	}
+	value, _ := environment.Get(sharedKeyEnv)
+	return shared.DecryptSecret(value)
+}
+
+// GetSharedKeyForRelease returns the decrypted effective key for a version, or "" when none is set.
+func GetSharedKeyForRelease(releaseVersion string) (string, error) {
+	merged, err := loadEnvironmentForReleaseProps(releaseVersion)
+	if err != nil || merged == nil {
+		return "", err
+	}
+	value, _ := merged.Get(sharedKeyEnv)
+	return shared.DecryptSecret(value)
+}
+
+// GetOwnSharedKeyForRelease returns the version's own key and whether its env.properties has a key line at all.
+func GetOwnSharedKeyForRelease(releaseVersion string) (string, bool, error) {
+	releaseEnvPath := filepath.Join(installDir, strings.TrimSpace(releaseVersion), "env.properties")
+	if _, err := os.Stat(releaseEnvPath); os.IsNotExist(err) {
+		return "", false, nil
+	}
+	props, err := properties.LoadFile(releaseEnvPath, properties.UTF8)
+	if err != nil {
+		return "", false, err
+	}
+	value, ok := props.Get(sharedKeyEnv)
+	if !ok {
+		return "", false, nil
+	}
+	plain, err := shared.DecryptSecret(value)
+	return plain, true, err
+}
+
+// UseDefaultSharedKeyForRelease removes the version's key line so the default key applies.
+func UseDefaultSharedKeyForRelease(releaseVersion string) error {
+	releaseEnvPath := filepath.Join(installDir, strings.TrimSpace(releaseVersion), "env.properties")
+	if _, err := os.Stat(releaseEnvPath); os.IsNotExist(err) {
+		return nil
+	}
+	props, err := properties.LoadFile(releaseEnvPath, properties.UTF8)
+	if err != nil {
+		return fmt.Errorf("loading %s: %w", releaseEnvPath, err)
+	}
+	props.Delete(sharedKeyEnv)
+	file, err := os.Create(releaseEnvPath)
+	if err != nil {
+		return fmt.Errorf("opening %s for writing: %w", releaseEnvPath, err)
+	}
+	defer file.Close()
+	if _, err := props.Write(file, properties.UTF8); err != nil {
+		return fmt.Errorf("writing %s: %w", releaseEnvPath, err)
+	}
+	log.Printf("Deleted property %s from %s", sharedKeyEnv, releaseEnvPath)
+	return nil
+}
+
 // SetInstallDir overrides the tracker installation directory for this process.
 func SetInstallDir(dir string) {
 	dir = strings.TrimSpace(dir)
@@ -164,6 +269,11 @@ func EnsureReleaseEnvFromParent(releaseVersion string) error {
 		propValue, _ := environment.Get(propKey)
 		props.Set(propKey, propValue)
 	}
+	if GetDefaultSharedKeyEnabled() {
+		props.Delete(sharedKeyEnv)
+	} else {
+		props.Set(sharedKeyEnv, "")
+	}
 	file, err := os.Create(releaseEnvPath)
 	if err != nil {
 		return fmt.Errorf("creating release env.properties: %w", err)
@@ -261,6 +371,9 @@ func InitEnv() error {
 	log.Printf("Loaded properties from %s:", envFilePath)
 	for _, key := range environment.Keys() {
 		value, _ := environment.Get(key)
+		if key == sharedKeyEnv && shared.IsSecretSet(value) {
+			value = "(set)"
+		}
 		log.Printf("  %s = %s", key, value)
 	}
 
