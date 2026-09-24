@@ -9,6 +9,15 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
+### 3.7.1
+
+- The control panel can now manage the keys for tracker, so there is no need to go to the OWLCMS database to store these values.
+- Fixed the "default" dialogs for OWLCMS and Tracker to allow the definition of a default key.
+  - Default options are applied when the versions are installed
+  - Tracker and OWLCMS manage their own default keys. For normal usage, these would be set to the same value.
+  - There is a "reset to default key" for the OWLCMS and for Tracker
+- Shared keys per version: "Reset to Default Key" makes the version use the default key again; "Clear Key" sets no key for that version even if a default key exists. The default dialogs also have "Clear Key".
+
 ### 3.7.0
 
 - controlpanel --repl
