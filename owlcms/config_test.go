@@ -114,6 +114,44 @@ func TestEnsureReleaseEnvCopiesPortAfterMenuOverride(t *testing.T) {
 	}
 }
 
+func TestNewVersionNeverCopiesDefaultKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	installDir := t.TempDir()
+	previousDir := GetInstallDir()
+	SetInstallDir(installDir)
+	t.Cleanup(func() {
+		SetInstallDir(previousDir)
+	})
+
+	if err := SaveDefaultTrackerConnectionKey("s3cret"); err != nil {
+		t.Fatalf("save default key: %v", err)
+	}
+	if err := SaveDefaultTrackerConnection("ws://localhost/ws", "8096", true); err != nil {
+		t.Fatalf("enable default: %v", err)
+	}
+	if err := EnsureReleaseEnvFromParent("65.0.0"); err != nil {
+		t.Fatalf("create release environment: %v", err)
+	}
+	if _, hasOwn, err := GetOwnTrackerConnectionKeyForRelease("65.0.0"); err != nil || hasOwn {
+		t.Fatalf("enabled: new version must have no key line, hasOwn=%v err=%v", hasOwn, err)
+	}
+	if got, _ := GetTrackerConnectionKeyForRelease("65.0.0"); got != "s3cret" {
+		t.Fatalf("enabled: new version key = %q, want the default", got)
+	}
+
+	if err := SaveDefaultTrackerConnection("ws://localhost/ws", "8096", false); err != nil {
+		t.Fatalf("disable default: %v", err)
+	}
+	if err := EnsureReleaseEnvFromParent("66.0.0"); err != nil {
+		t.Fatalf("create release environment: %v", err)
+	}
+	if key, hasOwn, err := GetOwnTrackerConnectionKeyForRelease("66.0.0"); err != nil || !hasOwn || key != "" {
+		t.Fatalf("disabled: new version must have an empty key line, key=%q hasOwn=%v err=%v", key, hasOwn, err)
+	}
+}
+
 func TestGetTrackerConnectionPortForReleaseReadsStoredURL(t *testing.T) {
 	installDir := t.TempDir()
 	previousDir := GetInstallDir()
@@ -235,5 +273,20 @@ func TestDefaultTrackerConnectionRetainsEndpointWhenDisabled(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "OWLCMS_VIDEODATA = ") {
 		t.Fatalf("expected disabled default to clear OWLCMS_VIDEODATA, got %q", string(content))
+	}
+}
+
+func TestClearedTrackerURLMeansLocalConnection(t *testing.T) {
+	if got := effectiveTrackerURL("   "); got != defaultTrackerConnectionURL {
+		t.Fatalf("cleared URL = %q, want %q", got, defaultTrackerConnectionURL)
+	}
+	if got := effectiveTrackerPort("", "18443"); got != defaultTrackerPort() {
+		t.Fatalf("cleared URL must reset port to %q, got %q", defaultTrackerPort(), got)
+	}
+	if got := trackerConnectionURL(effectiveTrackerURL(""), effectiveTrackerPort("", "")); got != "ws://localhost:"+defaultTrackerPort()+"/ws" {
+		t.Fatalf("cleared URL saved as %q", got)
+	}
+	if got := effectiveTrackerURL(" wss://t.example.org/ws "); got != "wss://t.example.org/ws" {
+		t.Fatalf("explicit URL = %q", got)
 	}
 }

@@ -29,6 +29,7 @@ var (
 const (
 	mdnsEnv                            = "OWLCMS_MDNS"
 	trackerConnectionEnv               = "OWLCMS_VIDEODATA"
+	trackerConnectionKeyEnv            = "OWLCMS_VIDEODATAKEY"
 	trackerConnectionURLSetting        = "CONTROLPANEL_TRACKER_URL"
 	trackerConnectionPortSetting       = "CONTROLPANEL_TRACKER_PORT"
 	trackerConnectionDefaultEnabledKey = "CONTROLPANEL_TRACKER_CONNECTION_ENABLED_BY_DEFAULT"
@@ -138,12 +139,27 @@ func GetReleaseEnvPath(releaseVersion string) string {
 	return filepath.Join(installDir, strings.TrimSpace(releaseVersion), "env.properties")
 }
 
+const secureTrackerPort = "443"
+
+func isSecureTrackerURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	return err == nil && strings.EqualFold(parsed.Scheme, "wss")
+}
+
+// TrackerPortForURL returns the port actually used for baseURL: wss:// always uses 443.
+func TrackerPortForURL(baseURL, port string) string {
+	if isSecureTrackerURL(baseURL) {
+		return secureTrackerPort
+	}
+	return strings.TrimSpace(port)
+}
+
 func trackerConnectionURL(baseURL, port string) string {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("%s://%s:%s/ws", parsed.Scheme, parsed.Hostname(), strings.TrimSpace(port))
+	return fmt.Sprintf("%s://%s:%s/ws", parsed.Scheme, parsed.Hostname(), TrackerPortForURL(baseURL, port))
 }
 
 func trackerConnectionSettings(value string) (string, string, bool) {
@@ -176,7 +192,7 @@ func defaultTrackerConnectionSettings() (string, string) {
 // OWLCMS versions should use it by default.
 func SaveDefaultTrackerConnection(baseURL, trackerPort string, enabled bool) error {
 	baseURL = strings.TrimSpace(baseURL)
-	trackerPort = strings.TrimSpace(trackerPort)
+	trackerPort = TrackerPortForURL(baseURL, trackerPort)
 	if trackerConnectionURL(baseURL, trackerPort) == "" {
 		return fmt.Errorf("tracker connection URL and port are required")
 	}
@@ -214,17 +230,96 @@ func ConfigureTrackerConnectionForReleaseURL(releaseVersion, baseURL, trackerPor
 		return fmt.Errorf("tracker port is required")
 	}
 	baseURL = strings.TrimSpace(baseURL)
-	parsed, err := url.Parse(baseURL)
+	if err := ValidateTrackerConnectionURL(baseURL); err != nil {
+		return err
+	}
+	return SavePropertyForRelease(releaseVersion, trackerConnectionEnv, trackerConnectionURL(baseURL, trackerPort))
+}
+
+// ValidateTrackerConnectionURL requires a ws:// or wss:// URL with a host and the /ws path.
+func ValidateTrackerConnectionURL(baseURL string) error {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Hostname() == "" || parsed.Path != "/ws" {
 		return fmt.Errorf("tracker connection URL must be a ws or wss URL ending in /ws")
 	}
-	return SavePropertyForRelease(releaseVersion, trackerConnectionEnv, trackerConnectionURL(baseURL, trackerPort))
+	return nil
 }
 
 // DisableTrackerConnectionForRelease writes an explicit blank release override so
 // the selected release clears any shared default tracker connection.
 func DisableTrackerConnectionForRelease(releaseVersion string) error {
 	return SavePropertyForRelease(releaseVersion, trackerConnectionEnv, "")
+}
+
+// SaveTrackerConnectionKeyForRelease stores the Tracker shared key encrypted with the installation key.
+func SaveTrackerConnectionKeyForRelease(releaseVersion, key string) error {
+	encrypted, err := shared.EncryptSecret(key)
+	if err != nil {
+		return fmt.Errorf("encrypting tracker shared key: %w", err)
+	}
+	return SavePropertyForRelease(releaseVersion, trackerConnectionKeyEnv, encrypted)
+}
+
+// SaveDefaultTrackerConnectionKey stores the shared key inherited by versions that do not set their own.
+func SaveDefaultTrackerConnectionKey(key string) error {
+	encrypted, err := shared.EncryptSecret(key)
+	if err != nil {
+		return fmt.Errorf("encrypting tracker shared key: %w", err)
+	}
+	return SaveProperty(trackerConnectionKeyEnv, encrypted)
+}
+
+// GetDefaultTrackerConnectionKey returns the decrypted default shared key.
+func GetDefaultTrackerConnectionKey() (string, error) {
+	if environment == nil {
+		return "", nil
+	}
+	value, _ := environment.Get(trackerConnectionKeyEnv)
+	if !shared.IsSecretSet(value) {
+		return "", nil
+	}
+	return shared.DecryptSecret(value)
+}
+
+// validateTrackerConnectionKey requires a shared key for wss://; ws:// accepts an empty key.
+func validateTrackerConnectionKey(baseURL, key string) error {
+	if isSecureTrackerURL(baseURL) && strings.TrimSpace(key) == "" {
+		return fmt.Errorf("a shared key is required for wss:// connections")
+	}
+	return nil
+}
+
+// GetTrackerConnectionKeyForRelease returns the decrypted Tracker shared key, or an error wrapping
+// shared.ErrSecretReentryRequired when the saved key cannot be used on this installation.
+func GetTrackerConnectionKeyForRelease(releaseVersion string) (string, error) {
+	merged, err := loadEnvironmentForReleaseProps(releaseVersion)
+	if err != nil || merged == nil {
+		return "", err
+	}
+	value, _ := merged.Get(trackerConnectionKeyEnv)
+	if !shared.IsSecretSet(value) {
+		return "", nil
+	}
+	return shared.DecryptSecret(value)
+}
+
+// GetOwnTrackerConnectionKeyForRelease returns the version's own key and whether its env.properties has a key line at all.
+func GetOwnTrackerConnectionKeyForRelease(releaseVersion string) (string, bool, error) {
+	releaseProps, err := loadReleaseProperties(releaseVersion)
+	if err != nil || releaseProps == nil {
+		return "", false, err
+	}
+	value, ok := releaseProps.Get(trackerConnectionKeyEnv)
+	if !ok {
+		return "", false, nil
+	}
+	plain, err := shared.DecryptSecret(value)
+	return plain, true, err
+}
+
+// UseDefaultTrackerConnectionKeyForRelease removes the version's key line so the default key applies.
+func UseDefaultTrackerConnectionKeyForRelease(releaseVersion string) error {
+	return DeletePropertyForRelease(releaseVersion, trackerConnectionKeyEnv)
 }
 
 func loadReleaseProperties(releaseVersion string) (*properties.Properties, error) {
@@ -345,6 +440,11 @@ func ensureReleaseEnvFromCurrentParent(releaseVersion string) (*properties.Prope
 		return nil, fmt.Errorf("failed to check release env.properties: %w", err)
 	} else {
 		releaseProps = cloneProperties(environment)
+		if GetTrackerConnectionEnabled() {
+			releaseProps.Delete(trackerConnectionKeyEnv)
+		} else {
+			releaseProps.Set(trackerConnectionKeyEnv, "")
+		}
 	}
 
 	defaults, defaultComments := defaultOwlcmsProperties()

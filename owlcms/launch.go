@@ -166,6 +166,8 @@ type owlcmsLaunchParams struct {
 	JavaPath   string
 	TargetPort string
 	Env        []string
+	// TrackerKeyWarning is set when the saved Tracker shared key could not be used.
+	TrackerKeyWarning string
 }
 
 const daemonMainClass = "app.owlcms.MainWrapper"
@@ -201,6 +203,7 @@ func applyOwlcmsPropertiesToEnv(env []string, props *properties.Properties) []st
 		trackerConnectionURLSetting:        {},
 		trackerConnectionPortSetting:       {},
 		trackerConnectionDefaultEnabledKey: {},
+		trackerConnectionKeyEnv:            {},
 	}
 	if value, ok := props.Get(trackerConnectionEnv); ok && strings.TrimSpace(value) == "" {
 		env = removeEnvKey(env, trackerConnectionEnv)
@@ -286,6 +289,7 @@ func prepareOwlcmsLaunch(version string, embeddedMQTTOverride *bool) (*owlcmsLau
 	}
 	logEffectiveOwlcmsEnvironment(version, effectiveEnv)
 	env = applyOwlcmsPropertiesToEnv(env, mergedEnv)
+	env, trackerKeyWarning := applyTrackerConnectionKeyToEnv(env, mergedEnv, version)
 	if embeddedMQTTOverride != nil {
 		value := "false"
 		if *embeddedMQTTOverride {
@@ -296,12 +300,36 @@ func prepareOwlcmsLaunch(version string, embeddedMQTTOverride *bool) (*owlcmsLau
 	}
 
 	return &owlcmsLaunchParams{
-		VersionDir: versionDir,
-		JarPath:    jarPath,
-		JavaPath:   localJava,
-		TargetPort: targetPort,
-		Env:        env,
+		VersionDir:        versionDir,
+		JarPath:           jarPath,
+		JavaPath:          localJava,
+		TargetPort:        targetPort,
+		Env:               env,
+		TrackerKeyWarning: trackerKeyWarning,
 	}, nil
+}
+
+// applyTrackerConnectionKeyToEnv passes the decrypted shared key to OWLCMS; the process environment wins if already set.
+func applyTrackerConnectionKeyToEnv(env []string, props *properties.Properties, version string) ([]string, string) {
+	for _, entry := range env {
+		if strings.HasPrefix(entry, trackerConnectionKeyEnv+"=") {
+			return env, ""
+		}
+	}
+	if props == nil {
+		return env, ""
+	}
+	value, _ := props.Get(trackerConnectionKeyEnv)
+	if !shared.IsSecretSet(value) {
+		return env, ""
+	}
+	plain, err := shared.DecryptSecret(value)
+	if err != nil {
+		warning := fmt.Sprintf("The Tracker shared key for version %s must be re-entered (Options > Tracker Connection): %v", version, err)
+		log.Print(warning)
+		return env, warning
+	}
+	return setEnvValue(env, trackerConnectionKeyEnv, plain), ""
 }
 
 func buildOwlcmsCommand(params *owlcmsLaunchParams, useDaemonWrapper bool) *exec.Cmd {
@@ -359,6 +387,9 @@ func LaunchDaemon(version string) error {
 	if err != nil {
 		return err
 	}
+	if params.TrackerKeyWarning != "" {
+		fmt.Fprintln(os.Stderr, params.TrackerKeyWarning)
+	}
 
 	if shared.CheckPort(params.TargetPort) == nil {
 		log.Printf("LaunchDaemon: port %s is in use, attempting to free it...", params.TargetPort)
@@ -383,6 +414,9 @@ func LaunchForeground(version string) error {
 	params, err := prepareOwlcmsLaunch(version, nil)
 	if err != nil {
 		return err
+	}
+	if params.TrackerKeyWarning != "" {
+		fmt.Fprintln(os.Stderr, params.TrackerKeyWarning)
 	}
 	if shared.CheckPort(params.TargetPort) == nil {
 		log.Printf("LaunchForeground: port %s is in use, attempting to free it...", params.TargetPort)
@@ -562,6 +596,9 @@ func launchOwlcms(version string, launchButton, stopBtn *widget.Button) error {
 		goBackToMainScreen()
 		releaseJavaLock()
 		return err
+	}
+	if params.TrackerKeyWarning != "" {
+		dialog.ShowInformation("Tracker Shared Key", params.TrackerKeyWarning, mainWindow)
 	}
 
 	targetPort := params.TargetPort
