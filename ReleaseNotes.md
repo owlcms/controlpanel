@@ -9,7 +9,7 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
-### 3.7.1
+### 3.8.0
 
 - The control panel can now manage the keys for tracker, so there is no need to go to the OWLCMS database to store these values.
 - Fixed the "default" dialogs for OWLCMS and Tracker to allow the definition of a default key.
