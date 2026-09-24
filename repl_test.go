@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"controlpanel/owlcms"
+	"controlpanel/tracker"
 )
 
 func TestParseREPLInvocation(t *testing.T) {
@@ -78,7 +79,7 @@ func TestOwlcmsVersionSettingsPersist(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"OWLCMS_PORT = 18080",
-		"OWLCMS_VIDEODATA = wss://tracker.example.org:18443/ws",
+		"OWLCMS_VIDEODATA = wss://tracker.example.org:443/ws",
 		"OWLCMS_ENABLEEMBEDDEDMQTT = true",
 		"OWLCMS_MQTTPORT = 1884",
 	} {
@@ -98,6 +99,83 @@ func TestOwlcmsVersionSettingsPersist(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "OWLCMS_VIDEODATA = ") || !strings.Contains(string(content), "OWLCMS_ENABLEEMBEDDEDMQTT = false") {
 		t.Fatalf("expected disabled settings in version env, got %q", string(content))
+	}
+}
+
+func TestOwlcmsTrackerKeyThreeStates(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	installDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(installDir, "66.0.0"), 0o755); err != nil {
+		t.Fatalf("create version dir: %v", err)
+	}
+	owlcms.SetInstallDir(installDir)
+	t.Cleanup(resetInstallDirsForTest)
+
+	var output bytes.Buffer
+	run := func(value string) {
+		command := []string{"A", "tracker", "key", value}
+		if handled, err := executeREPLOwlcmsSetting(command, &output); !handled || err != nil {
+			t.Fatalf("execute %#v: handled=%v err=%v", command, handled, err)
+		}
+	}
+
+	run("s3cret")
+	if key, hasOwn, err := owlcms.GetOwnTrackerConnectionKeyForRelease("66.0.0"); err != nil || !hasOwn || key != "s3cret" {
+		t.Fatalf("own key: key=%q hasOwn=%v err=%v", key, hasOwn, err)
+	}
+	run("off")
+	if key, hasOwn, err := owlcms.GetOwnTrackerConnectionKeyForRelease("66.0.0"); err != nil || !hasOwn || key != "" {
+		t.Fatalf("off: key=%q hasOwn=%v err=%v", key, hasOwn, err)
+	}
+	run("default")
+	if _, hasOwn, err := owlcms.GetOwnTrackerConnectionKeyForRelease("66.0.0"); err != nil || hasOwn {
+		t.Fatalf("default: hasOwn=%v err=%v", hasOwn, err)
+	}
+}
+
+func TestREPLDefaultSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	owlcms.SetInstallDir(t.TempDir())
+	tracker.SetInstallDir(t.TempDir())
+	t.Cleanup(resetInstallDirsForTest)
+
+	var output bytes.Buffer
+	owlcmsCommands := [][]string{
+		{"default", "tracker", "on", "wss://tracker.example.org/ws", "18443"},
+		{"default", "tracker", "key", "s3cret"},
+	}
+	for _, command := range owlcmsCommands {
+		if handled, err := executeREPLOwlcmsSetting(command, &output); !handled || err != nil {
+			t.Fatalf("execute %#v: handled=%v err=%v", command, handled, err)
+		}
+	}
+	if url, port, enabled := owlcms.GetTrackerConnectionSettings(); url != "wss://tracker.example.org/ws" || port != "443" || !enabled {
+		t.Fatalf("default connection = %q %q %v", url, port, enabled)
+	}
+	if key, _ := owlcms.GetDefaultTrackerConnectionKey(); key != "s3cret" {
+		t.Fatalf("default owlcms key = %q", key)
+	}
+	if handled, err := executeREPLOwlcmsSetting([]string{"default", "tracker", "off"}, &output); !handled || err != nil {
+		t.Fatalf("default off: handled=%v err=%v", handled, err)
+	}
+	if url, _, enabled := owlcms.GetTrackerConnectionSettings(); url != "wss://tracker.example.org/ws" || enabled {
+		t.Fatalf("off must keep URL and disable: %q %v", url, enabled)
+	}
+
+	for _, command := range [][]string{{"default", "key", "fallback"}, {"default", "new-versions", "off"}} {
+		if handled, err := executeREPLTrackerSetting(command, &output); !handled || err != nil {
+			t.Fatalf("execute %#v: handled=%v err=%v", command, handled, err)
+		}
+	}
+	if key, _ := tracker.GetDefaultSharedKey(); key != "fallback" {
+		t.Fatalf("default tracker key = %q", key)
+	}
+	if tracker.GetDefaultSharedKeyEnabled() {
+		t.Fatalf("new-versions off must disable copying the default key")
 	}
 }
 

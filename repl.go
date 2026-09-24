@@ -221,9 +221,15 @@ func writeREPLOwlcmsHelp(out io.Writer) {
 	fmt.Fprintln(out, "  owlcms <selector> port <port>")
 	fmt.Fprintln(out, "  owlcms <selector> tracker on [port]")
 	fmt.Fprintln(out, "  owlcms <selector> tracker on <ws://host/ws> <port>")
+	fmt.Fprintln(out, "  owlcms <selector> tracker key <shared-key>|off|default")
 	fmt.Fprintln(out, "  owlcms <selector> tracker off")
 	fmt.Fprintln(out, "  owlcms <selector> mqtt on [port]")
 	fmt.Fprintln(out, "  owlcms <selector> mqtt off")
+	fmt.Fprintln(out, "Defaults (used by 'tracker on [port]', 'tracker key default', and new versions):")
+	fmt.Fprintln(out, "  owlcms default tracker on [port]")
+	fmt.Fprintln(out, "  owlcms default tracker on <ws://host/ws> <port>")
+	fmt.Fprintln(out, "  owlcms default tracker off")
+	fmt.Fprintln(out, "  owlcms default tracker key <shared-key>|off")
 }
 
 func writeREPLTrackerHelp(out io.Writer) {
@@ -239,6 +245,11 @@ func writeREPLTrackerHelp(out io.Writer) {
 	fmt.Fprintln(out, "  tracker rename|duplicate [selector] <name>")
 	fmt.Fprintln(out, "  tracker import <source-selector> <target-selector>")
 	fmt.Fprintln(out, "  tracker remove [selector]")
+	fmt.Fprintln(out, "Persistent version settings:")
+	fmt.Fprintln(out, "  tracker <selector> key <shared-key>|off|default")
+	fmt.Fprintln(out, "Defaults (used by 'key default' and new versions):")
+	fmt.Fprintln(out, "  tracker default key <shared-key>|off")
+	fmt.Fprintln(out, "  tracker default new-versions on|off")
 }
 
 func executeREPLModule(module string, args []string, session *replSession, out io.Writer) error {
@@ -259,6 +270,11 @@ func executeREPLModule(module string, args []string, session *replSession, out i
 	}
 	if module == "owlcms" {
 		handled, err := executeREPLOwlcmsSetting(args, out)
+		if handled {
+			return err
+		}
+	} else {
+		handled, err := executeREPLTrackerSetting(args, out)
 		if handled {
 			return err
 		}
@@ -533,7 +549,132 @@ func replVersionSelector(index int) string {
 	return string(selector)
 }
 
+func executeREPLTrackerSetting(args []string, out io.Writer) (bool, error) {
+	if len(args) >= 1 && strings.EqualFold(args[0], "default") {
+		return true, executeREPLTrackerDefault(args[1:], out)
+	}
+	if len(args) < 2 || !strings.EqualFold(args[1], "key") {
+		return false, nil
+	}
+	version, err := resolveREPLVersionSelector("tracker", args[0])
+	if err != nil {
+		return true, err
+	}
+	if len(args) != 3 {
+		return true, fmt.Errorf("tracker <selector> key requires '<shared-key>', 'off', or 'default'")
+	}
+	key := args[2]
+	if strings.EqualFold(key, "default") {
+		if err := tracker.UseDefaultSharedKeyForRelease(version); err != nil {
+			return true, err
+		}
+		fmt.Fprintf(out, "tracker %s uses the default shared key (persistent)\n", version)
+		return true, nil
+	}
+	if strings.EqualFold(key, "off") {
+		key = ""
+	}
+	if err := tracker.SaveSharedKeyForRelease(version, key); err != nil {
+		return true, err
+	}
+	if key == "" {
+		fmt.Fprintf(out, "tracker %s shared key is empty: any connection is accepted, no matter what key is sent (persistent)\n", version)
+	} else {
+		fmt.Fprintf(out, "tracker %s shared key saved, encrypted for this computer (persistent)\n", version)
+	}
+	return true, nil
+}
+
+func executeREPLTrackerDefault(values []string, out io.Writer) error {
+	switch {
+	case len(values) == 2 && strings.EqualFold(values[0], "key"):
+		key := values[1]
+		if strings.EqualFold(key, "off") {
+			key = ""
+		}
+		if err := tracker.SaveDefaultSharedKey(key); err != nil {
+			return err
+		}
+		if key == "" {
+			fmt.Fprintln(out, "tracker default shared key is empty (persistent)")
+		} else {
+			fmt.Fprintln(out, "tracker default shared key saved, encrypted for this computer (persistent)")
+		}
+		return nil
+	case len(values) == 2 && strings.EqualFold(values[0], "new-versions") && (strings.EqualFold(values[1], "on") || strings.EqualFold(values[1], "off")):
+		enabled := strings.EqualFold(values[1], "on")
+		if err := tracker.SaveDefaultSharedKeyEnabled(enabled); err != nil {
+			return err
+		}
+		if enabled {
+			fmt.Fprintln(out, "new Tracker versions will use the default shared key (persistent)")
+		} else {
+			fmt.Fprintln(out, "new Tracker versions will have an empty shared key (persistent)")
+		}
+		return nil
+	}
+	return fmt.Errorf("tracker default requires 'key <shared-key>|off' or 'new-versions on|off'")
+}
+
+func executeREPLOwlcmsDefault(values []string, out io.Writer) error {
+	usage := fmt.Errorf("owlcms default tracker requires 'on [port]', 'on <url> <port>', 'off', or 'key <shared-key>|off'")
+	if len(values) < 2 || !strings.EqualFold(values[0], "tracker") {
+		return usage
+	}
+	values = values[1:]
+	baseURL, trackerPort, _ := owlcms.GetTrackerConnectionSettings()
+	switch {
+	case strings.EqualFold(values[0], "key"):
+		if len(values) != 2 {
+			return usage
+		}
+		key := values[1]
+		if strings.EqualFold(key, "off") {
+			key = ""
+		}
+		if err := owlcms.SaveDefaultTrackerConnectionKey(key); err != nil {
+			return err
+		}
+		if key == "" {
+			fmt.Fprintln(out, "owlcms default tracker shared key is empty (persistent)")
+		} else {
+			fmt.Fprintln(out, "owlcms default tracker shared key saved, encrypted for this computer (persistent)")
+		}
+		return nil
+	case len(values) == 1 && strings.EqualFold(values[0], "off"):
+		if err := owlcms.SaveDefaultTrackerConnection(baseURL, trackerPort, false); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "new OWLCMS versions will not connect to Tracker; default kept as %s on port %s (persistent)\n", baseURL, trackerPort)
+		return nil
+	case strings.EqualFold(values[0], "on") && len(values) <= 3:
+		if len(values) == 2 {
+			trackerPort = values[1]
+		}
+		if len(values) == 3 {
+			baseURL = values[1]
+			trackerPort = values[2]
+		}
+		if err := owlcms.ValidateTrackerConnectionURL(baseURL); err != nil {
+			return err
+		}
+		trackerPort = owlcms.TrackerPortForURL(baseURL, trackerPort)
+		if !isREPLPort(trackerPort) {
+			return fmt.Errorf("tracker port must be a number between 1 and 65535")
+		}
+		if err := owlcms.SaveDefaultTrackerConnection(baseURL, trackerPort, true); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "new OWLCMS versions will connect to Tracker at %s on port %s (persistent)\n", baseURL, trackerPort)
+		return nil
+	}
+	return usage
+}
+
 func executeREPLOwlcmsSetting(args []string, out io.Writer) (bool, error) {
+	if len(args) >= 1 && strings.EqualFold(args[0], "default") {
+		return true, executeREPLOwlcmsDefault(args[1:], out)
+	}
 	if len(args) < 2 {
 		return false, nil
 	}
@@ -586,6 +727,31 @@ func executeREPLOwlcmsSetting(args []string, out io.Writer) (bool, error) {
 		return true, nil
 	}
 
+	if len(values) >= 1 && strings.EqualFold(values[0], "key") {
+		if len(values) != 2 {
+			return true, fmt.Errorf("owlcms <selector> tracker key requires '<shared-key>', 'off', or 'default'")
+		}
+		key := values[1]
+		if strings.EqualFold(key, "default") {
+			if err := owlcms.UseDefaultTrackerConnectionKeyForRelease(version); err != nil {
+				return true, err
+			}
+			fmt.Fprintf(out, "owlcms %s uses the default tracker shared key (persistent)\n", version)
+			return true, nil
+		}
+		if strings.EqualFold(key, "off") {
+			key = ""
+		}
+		if err := owlcms.SaveTrackerConnectionKeyForRelease(version, key); err != nil {
+			return true, err
+		}
+		if key == "" {
+			fmt.Fprintf(out, "owlcms %s tracker shared key is empty: no key is sent (persistent)\n", version)
+		} else {
+			fmt.Fprintf(out, "owlcms %s tracker shared key saved, encrypted for this computer (persistent)\n", version)
+		}
+		return true, nil
+	}
 	if len(values) == 1 && strings.EqualFold(values[0], "off") {
 		if err := owlcms.DisableTrackerConnectionForRelease(version); err != nil {
 			return true, err
@@ -594,7 +760,7 @@ func executeREPLOwlcmsSetting(args []string, out io.Writer) (bool, error) {
 		return true, nil
 	}
 	if len(values) < 1 || !strings.EqualFold(values[0], "on") || len(values) > 3 {
-		return true, fmt.Errorf("owlcms <selector> tracker requires 'on [port]', 'on <url> <port>', or 'off'")
+		return true, fmt.Errorf("owlcms <selector> tracker requires 'on [port]', 'on <url> <port>', 'key <shared-key>|off|default', or 'off'")
 	}
 
 	baseURL, trackerPort, _ := owlcms.GetTrackerConnectionSettings()
@@ -605,6 +771,7 @@ func executeREPLOwlcmsSetting(args []string, out io.Writer) (bool, error) {
 		baseURL = values[1]
 		trackerPort = values[2]
 	}
+	trackerPort = owlcms.TrackerPortForURL(baseURL, trackerPort)
 	if !isREPLPort(trackerPort) {
 		return true, fmt.Errorf("tracker port must be a number between 1 and 65535")
 	}
