@@ -20,12 +20,17 @@ const encryptedValuePrefix = "enc:v1:"
 var ErrSecretReentryRequired = errors.New("the saved key must be entered again")
 
 // installationKeyPath is outside the install folder so copying that folder does not carry the key.
+// Control panel 3.8.0 stored the key as the file ~/.owlcms; that file is still used when present.
 func installationKeyPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locating home directory: %w", err)
 	}
-	return filepath.Join(home, ".owlcms"), nil
+	legacyPath := filepath.Join(home, ".owlcms")
+	if info, err := os.Stat(legacyPath); err == nil && info.Mode().IsRegular() {
+		return legacyPath, nil
+	}
+	return filepath.Join(legacyPath, "key"), nil
 }
 
 func loadInstallationKey(create bool) ([]byte, error) {
@@ -48,6 +53,9 @@ func loadInstallationKey(create bool) ([]byte, error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generating installation key: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		return nil, fmt.Errorf("creating installation key folder %s: %w", filepath.Dir(keyPath), err)
 	}
 	file, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -78,7 +86,7 @@ func IsSecretSet(value string) bool {
 	return strings.TrimSpace(value) != ""
 }
 
-// EncryptSecret encrypts plain with the installation key in ~/.owlcms, creating that key on first use.
+// EncryptSecret encrypts plain with the installation key, creating ~/.owlcms/key on first use.
 // A blank key yields an empty value.
 func EncryptSecret(plain string) (string, error) {
 	plain = strings.TrimSpace(plain)

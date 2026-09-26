@@ -1,7 +1,9 @@
 package owlcms
 
 import (
+	"bytes"
 	"controlpanel/shared"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -29,16 +31,49 @@ func TestSecretRoundTrip(t *testing.T) {
 	if !strings.HasPrefix(encrypted, "enc:v1:") || strings.Contains(encrypted, "s3cret") {
 		t.Fatalf("unexpected encrypted value %q", encrypted)
 	}
-	info, err := os.Stat(filepath.Join(home, ".owlcms"))
+	info, err := os.Stat(filepath.Join(home, ".owlcms", "key"))
 	if err != nil {
 		t.Fatalf("installation key not created: %v", err)
 	}
 	if os.PathSeparator == '/' && info.Mode().Perm() != 0o600 {
 		t.Fatalf("installation key permissions = %v, want 0600", info.Mode().Perm())
 	}
+	folder, err := os.Stat(filepath.Join(home, ".owlcms"))
+	if err != nil || !folder.IsDir() {
+		t.Fatalf("installation key folder not created: %v", err)
+	}
+	if os.PathSeparator == '/' && folder.Mode().Perm() != 0o700 {
+		t.Fatalf("installation key folder permissions = %v, want 0700", folder.Mode().Perm())
+	}
 
 	plain, err := shared.DecryptSecret(encrypted)
 	if err != nil || plain != "s3cret key" {
+		t.Fatalf("decrypt = %q, %v", plain, err)
+	}
+}
+
+func TestSecretUsesLegacyInstallationKeyFile(t *testing.T) {
+	home := useTempHome(t)
+	legacyPath := filepath.Join(home, ".owlcms")
+	legacyKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)) + "\n"
+	if err := os.WriteFile(legacyPath, []byte(legacyKey), 0o600); err != nil {
+		t.Fatalf("write legacy key: %v", err)
+	}
+
+	encrypted, err := shared.EncryptSecret("s3cret")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	info, err := os.Stat(legacyPath)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("legacy key file must be kept as a file: %v", err)
+	}
+	data, err := os.ReadFile(legacyPath)
+	if err != nil || string(data) != legacyKey {
+		t.Fatalf("legacy key file must be unchanged, got %q, %v", data, err)
+	}
+	plain, err := shared.DecryptSecret(encrypted)
+	if err != nil || plain != "s3cret" {
 		t.Fatalf("decrypt = %q, %v", plain, err)
 	}
 }

@@ -132,9 +132,27 @@ func executeREPLLine(line string, session *replSession, out io.Writer) (bool, er
 		return false, nil
 	case "owlcms", "tracker":
 		return false, executeREPLModule(args[0], args[1:], session, out)
+	case "secret":
+		return false, executeREPLSecret(args[1:], out)
 	default:
 		return false, fmt.Errorf("unknown command %q; use help", args[0])
 	}
+}
+
+// executeREPLSecret prints an enc:v1: value that OWLCMS decrypts with this computer's installation key.
+func executeREPLSecret(args []string, out io.Writer) error {
+	if len(args) != 2 || !strings.EqualFold(args[0], "encrypt") {
+		return fmt.Errorf("usage: secret encrypt <value>")
+	}
+	if !shared.IsSecretSet(args[1]) {
+		return fmt.Errorf("secret encrypt requires a non-empty value")
+	}
+	encrypted, err := shared.EncryptSecret(args[1])
+	if err != nil {
+		return fmt.Errorf("encrypting value: %w", err)
+	}
+	fmt.Fprintln(out, encrypted)
+	return nil
 }
 
 func splitREPLCommand(line string) ([]string, error) {
@@ -200,6 +218,7 @@ func writeREPLContext(out io.Writer) {
 
 func writeREPLHelp(out io.Writer) {
 	fmt.Fprintln(out, "Commands: context, help, exit, quit")
+	fmt.Fprintln(out, "  secret encrypt <value>   print the value encrypted for this computer (enc:v1:...)")
 	fmt.Fprintln(out, "Use 'owlcms help' for OWLCMS commands.")
 	fmt.Fprintln(out, "Use 'tracker help' for Tracker commands.")
 }

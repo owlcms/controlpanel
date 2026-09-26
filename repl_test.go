@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"controlpanel/owlcms"
+	"controlpanel/shared"
 	"controlpanel/tracker"
 )
 
@@ -258,6 +259,30 @@ func TestREPLHelpPointsToModuleHelp(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "owlcms help") || !strings.Contains(output.String(), "tracker help") {
 		t.Fatalf("expected module help directions, got %q", output.String())
+	}
+}
+
+func TestREPLSecretEncrypt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	var output bytes.Buffer
+	if _, err := executeREPLLine("secret encrypt s3cret", &replSession{}, &output); err != nil {
+		t.Fatalf("secret encrypt returned error: %v", err)
+	}
+	encrypted := strings.TrimSpace(output.String())
+	if !strings.HasPrefix(encrypted, "enc:v1:") || strings.Contains(encrypted, "s3cret") {
+		t.Fatalf("unexpected encrypted value %q", encrypted)
+	}
+	if plain, err := shared.DecryptSecret(encrypted); err != nil || plain != "s3cret" {
+		t.Fatalf("decrypt = %q, %v", plain, err)
+	}
+
+	for _, command := range []string{"secret encrypt", "secret encrypt ''", "secret decrypt x"} {
+		if _, err := executeREPLLine(command, &replSession{}, &output); err == nil {
+			t.Fatalf("%q must be rejected", command)
+		}
 	}
 }
 

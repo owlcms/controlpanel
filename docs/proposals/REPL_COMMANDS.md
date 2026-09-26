@@ -58,7 +58,10 @@ Use `--runtime-dir <path>` with either startup form when the instance needs a no
 | `help` | Show general commands and point to the module help commands. |
 | `owlcms help` | Show OWLCMS commands and persistent OWLCMS version settings. |
 | `tracker help` | Show Tracker commands. |
+| `secret encrypt <value>` | Print `<value>` encrypted with this computer's installation key, as `enc:v1:...`. Use the result in place of the plain value, for example as `GOOGLE_SHEETS_API_KEY`; OWLCMS decrypts it on this computer. Type it in the interactive REPL so the plain value does not reach the shell history. |
 | `exit` or `quit` | Leave the read-eval loop. |
+
+The installation key is `~/.owlcms/key`, created on first use. A `~/.owlcms` file created by Control Panel 3.8.0 is still used as the key when present.
 
 Create a new `records` instance using the normal startup options, then manage it from its own REPL:
 
@@ -100,7 +103,7 @@ The `<name>` arguments of `rename` and `duplicate` are metadata labels, not comp
 | `owlcms <selector> tracker on` | Persistently enable the Tracker connection using the GUI's default URL and port. |
 | `owlcms <selector> tracker on <port>` | Persistently enable the Tracker connection using the GUI's default URL and the given port. |
 | `owlcms <selector> tracker on <url> <port>` | Persistently enable the Tracker connection using a `ws://` or `wss://` URL ending in `/ws` and a separate port. `wss://` always uses port 443. |
-| `owlcms <selector> tracker key <shared-key>` | Persistently store the Tracker shared key (`OWLCMS_VIDEODATAKEY`), encrypted with the installation key in `~/.owlcms`. `tracker key off` saves an empty key (no key is sent); `tracker key default` removes the version's own key so the default key applies. |
+| `owlcms <selector> tracker key <shared-key>` | Persistently store the Tracker shared key (`OWLCMS_VIDEODATAKEY`), encrypted with the installation key in `~/.owlcms/key`. `tracker key off` saves an empty key (no key is sent); `tracker key default` removes the version's own key so the default key applies. |
 | `owlcms <selector> tracker off` | Persistently disable the Tracker connection for one installed version. |
 | `owlcms <selector> mqtt on [port]` | Persistently enable embedded MQTT as `OWLCMS_ENABLEEMBEDDEDMQTT`; an optional port sets `OWLCMS_MQTTPORT`. |
 | `owlcms <selector> mqtt off` | Persistently disable embedded MQTT for one installed version. |
@@ -149,7 +152,7 @@ owlcms A tracker on wss://tracker.example.org/ws 443
 | `tracker duplicate [selector] <name>` | Copy an installed version using `<name>` as its new metadata. Without a selector, duplicates `A`. |
 | `tracker import <source-selector> <target-selector>` | Copy data and configuration between two installed versions. |
 | `tracker remove [selector]` | Permanently remove an installed version. Without a selector, removes `A`; batch mode executes immediately. |
-| `tracker <selector> key <shared-key>` | Persistently store the key this Tracker version requires from OWLCMS (`OWLCMS_UPDATEKEY`), encrypted with the installation key in `~/.owlcms`. `tracker <selector> key off` saves an empty value (any connection is accepted, no matter what key is sent); `tracker <selector> key default` removes the version's own key so the default key applies. |
+| `tracker <selector> key <shared-key>` | Persistently store the key this Tracker version requires from OWLCMS (`OWLCMS_UPDATEKEY`), encrypted with the installation key in `~/.owlcms/key`. `tracker <selector> key off` saves an empty value (any connection is accepted, no matter what key is sent); `tracker <selector> key default` removes the version's own key so the default key applies. |
 | `tracker default key <shared-key>` | Store the default Tracker shared key, encrypted; `off` saves an empty default key. |
 | `tracker default new-versions on\|off` | Whether newly installed Tracker versions get a copy of the default key (`on`) or an empty key (`off`). |
 
