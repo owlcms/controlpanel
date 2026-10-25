@@ -655,7 +655,7 @@ jobs:
       shell: pwsh
       run: |
         cd dist
-        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "setup.iss"
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DDisplayVersion=$env:TAG" "setup.iss"
         dir
         cd ..
         New-Item -ItemType Directory -Path artifacts -Force

@@ -1,5 +1,8 @@
 [Setup]
 AppName=owlcms Control Panel
+#ifdef DisplayVersion
+AppVerName=owlcms Control Panel {#DisplayVersion}
+#endif
 AppVersion=3.0.5400
 AppPublisher=Jean-François Lamy
 AppPublisherURL=https://owlcms.jflamy.dev
