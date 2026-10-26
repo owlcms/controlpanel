@@ -1,5 +1,9 @@
 # Development Guidance
 
+## Git Commits
+
+- Never add a Copilot `Co-authored-by` trailer to a commit message.
+
 ## Fyne UI Concurrency
 
 - Perform UI changes from background work through `fyne.Do(...)` so they run on the Fyne UI thread. Do not mutate Fyne widgets directly from a worker.
