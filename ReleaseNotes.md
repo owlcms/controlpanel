@@ -9,6 +9,10 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
+### 3.9.1
+
+- REPL: `secret encrypt <keyname> <value>` encrypts with the key file `~/.owlcms/<keyname>`, created on first use, so that keys given to other programs are kept apart from the control panel's own key. For example, `secret encrypt apiprotection.aes <value>` for the API keys that OWLCMS decrypts with `~/.owlcms/apiprotection.aes`.
+
 ### 3.9.0
 
 - The separate Cameras and Replays tabs have been removed. The Video module replaces both programs.

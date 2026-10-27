@@ -58,10 +58,10 @@ Use `--runtime-dir <path>` with either startup form when the instance needs a no
 | `help` | Show general commands and point to the module help commands. |
 | `owlcms help` | Show OWLCMS commands and persistent OWLCMS version settings. |
 | `tracker help` | Show Tracker commands. |
-| `secret encrypt <value>` | Print `<value>` encrypted with this computer's installation key, as `enc:v1:...`. Use the result in place of the plain value, for example as `GOOGLE_SHEETS_API_KEY`; OWLCMS decrypts it on this computer. Type it in the interactive REPL so the plain value does not reach the shell history. |
+| `secret encrypt <keyname> <value>` | Print `<value>` encrypted with the key in `~/.owlcms/<keyname>`, as `enc:v1:...`; the key is created on first use. The program that uses the value decrypts it with the same file: for example `secret encrypt apiprotection.aes <value>` for `GOOGLE_SHEETS_API_KEY`, which OWLCMS decrypts with `~/.owlcms/apiprotection.aes`. `key` is refused: it is the control panel's own key. Type it in the interactive REPL so the plain value does not reach the shell history. |
 | `exit` or `quit` | Leave the read-eval loop. |
 
-The installation key is `~/.owlcms/key`, created on first use. A `~/.owlcms` file created by Control Panel 3.8.0 is still used as the key when present.
+The installation key `~/.owlcms/key`, created on first use, protects the keys the control panel saves for its own launches. A `~/.owlcms` file created by Control Panel 3.8.0 is still used as that key when present.
 
 Create a new `records` instance using the normal startup options, then manage it from its own REPL:
 

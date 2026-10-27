@@ -11,10 +11,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const encryptedValuePrefix = "enc:v1:"
+
+var namedKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
 
 // ErrSecretReentryRequired means a saved secret cannot be used on this installation and must be typed again.
 var ErrSecretReentryRequired = errors.New("the saved key must be entered again")
@@ -38,32 +41,66 @@ func loadInstallationKey(create bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return loadKeyFile(keyPath, create)
+}
+
+// NamedKeyPath returns ~/.owlcms/<keyName>, for a key file kept apart from the control panel's own installation key.
+func NamedKeyPath(keyName string) (string, error) {
+	if !namedKeyPattern.MatchString(keyName) || keyName == "key" {
+		return "", fmt.Errorf("invalid key name %q: use letters, digits, '.', '_' or '-', not starting with '.', and not \"key\"", keyName)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locating home directory: %w", err)
+	}
+	return filepath.Join(home, ".owlcms", keyName), nil
+}
+
+// EncryptSecretWithNamedKey encrypts plain with the key in ~/.owlcms/<keyName>, creating it on first use.
+// The program that decrypts the value reads the same file, for example OWLCMS with apiprotection.aes.
+func EncryptSecretWithNamedKey(keyName, plain string) (string, error) {
+	keyPath, err := NamedKeyPath(keyName)
+	if err != nil {
+		return "", err
+	}
+	plain = strings.TrimSpace(plain)
+	if plain == "" {
+		return "", nil
+	}
+	key, err := loadKeyFile(keyPath, true)
+	if err != nil {
+		return "", err
+	}
+	return sealSecret(key, plain)
+}
+
+func loadKeyFile(keyPath string, create bool) ([]byte, error) {
 	data, err := os.ReadFile(keyPath)
 	if err == nil {
 		key, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
 		if decodeErr != nil || len(key) != 32 {
-			return nil, fmt.Errorf("invalid installation key in %s", keyPath)
+			return nil, fmt.Errorf("invalid encryption key in %s", keyPath)
 		}
 		return key, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) || !create {
-		return nil, fmt.Errorf("reading installation key %s: %w", keyPath, err)
+		return nil, fmt.Errorf("reading encryption key %s: %w", keyPath, err)
 	}
 
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("generating installation key: %w", err)
+		return nil, fmt.Errorf("generating encryption key: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
-		return nil, fmt.Errorf("creating installation key folder %s: %w", filepath.Dir(keyPath), err)
+		return nil, fmt.Errorf("creating encryption key folder %s: %w", filepath.Dir(keyPath), err)
 	}
 	file, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("creating installation key %s: %w", keyPath, err)
+		return nil, fmt.Errorf("creating encryption key %s: %w", keyPath, err)
 	}
 	defer file.Close()
 	if _, err := file.WriteString(base64.StdEncoding.EncodeToString(key) + "\n"); err != nil {
-		return nil, fmt.Errorf("writing installation key %s: %w", keyPath, err)
+		return nil, fmt.Errorf("writing encryption key %s: %w", keyPath, err)
 	}
 	return key, nil
 }
@@ -97,6 +134,10 @@ func EncryptSecret(plain string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return sealSecret(key, plain)
+}
+
+func sealSecret(key []byte, plain string) (string, error) {
 	gcm, err := newInstallationCipher(key)
 	if err != nil {
 		return "", err

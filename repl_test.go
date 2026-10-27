@@ -268,18 +268,44 @@ func TestREPLSecretEncrypt(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 
 	var output bytes.Buffer
-	if _, err := executeREPLLine("secret encrypt s3cret", &replSession{}, &output); err != nil {
+	if _, err := executeREPLLine("secret encrypt apiprotection.aes s3cret", &replSession{}, &output); err != nil {
 		t.Fatalf("secret encrypt returned error: %v", err)
 	}
 	encrypted := strings.TrimSpace(output.String())
 	if !strings.HasPrefix(encrypted, "enc:v1:") || strings.Contains(encrypted, "s3cret") {
 		t.Fatalf("unexpected encrypted value %q", encrypted)
 	}
+	namedKey := filepath.Join(home, ".owlcms", "apiprotection.aes")
+	info, err := os.Stat(namedKey)
+	if err != nil {
+		t.Fatalf("named key not created: %v", err)
+	}
+	if os.PathSeparator == '/' && info.Mode().Perm() != 0o600 {
+		t.Fatalf("named key permissions = %v, want 0600", info.Mode().Perm())
+	}
+	installationKey := filepath.Join(home, ".owlcms", "key")
+	if _, err := os.Stat(installationKey); !os.IsNotExist(err) {
+		t.Fatalf("secret encrypt must not create the control panel key, stat err = %v", err)
+	}
+
+	// the value decrypts only with the named key
+	if _, err := shared.DecryptSecret(encrypted); err == nil {
+		t.Fatalf("value must not decrypt without the named key")
+	}
+	data, err := os.ReadFile(namedKey)
+	if err != nil {
+		t.Fatalf("read named key: %v", err)
+	}
+	if err := os.WriteFile(installationKey, data, 0o600); err != nil {
+		t.Fatalf("copy named key: %v", err)
+	}
 	if plain, err := shared.DecryptSecret(encrypted); err != nil || plain != "s3cret" {
 		t.Fatalf("decrypt = %q, %v", plain, err)
 	}
 
-	for _, command := range []string{"secret encrypt", "secret encrypt ''", "secret decrypt x"} {
+	for _, command := range []string{"secret encrypt", "secret encrypt s3cret", "secret encrypt apiprotection.aes ''",
+		"secret encrypt key s3cret", "secret encrypt ../escape s3cret", "secret encrypt .hidden s3cret",
+		"secret decrypt apiprotection.aes x"} {
 		if _, err := executeREPLLine(command, &replSession{}, &output); err == nil {
 			t.Fatalf("%q must be rejected", command)
 		}
