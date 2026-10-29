@@ -111,6 +111,9 @@ func restoreOwlcmsStoppedUI(stopBtn, launchButton *widget.Button, message string
 		if urlLink != nil {
 			urlLink.Hide()
 		}
+		if tokenRow != nil {
+			tokenRow.Hide()
+		}
 		if appDirLink != nil {
 			appDirLink.Hide()
 		}
@@ -120,8 +123,8 @@ func restoreOwlcmsStoppedUI(stopBtn, launchButton *widget.Button, message string
 	})
 }
 
-func logRestartDecision(version string, pid int, waitErr error, retryCount, maxRestartRetries int) bool {
-	restartable := shared.ShouldRestartProcess(waitErr)
+func logRestartDecision(version string, pid int, waitErr error, env []string, retryCount, maxRestartRetries int) (bool, []string) {
+	restartable, nextEnv := restartDecision(env, waitErr)
 	willRestart := !killedByUs && restartable && retryCount < maxRestartRetries
 
 	details := []string{
@@ -131,6 +134,8 @@ func logRestartDecision(version string, pid int, waitErr error, retryCount, maxR
 		fmt.Sprintf("waitErrNil=%t", waitErr == nil),
 		fmt.Sprintf("restartable=%t", restartable),
 		fmt.Sprintf("willRestart=%t", willRestart),
+		fmt.Sprintf("startupImport=%t", launchesStartupImport(env)),
+		fmt.Sprintf("startupImportDropped=%t", launchesStartupImport(env) && !launchesStartupImport(nextEnv)),
 	}
 
 	if waitErr == nil {
@@ -157,7 +162,7 @@ func logRestartDecision(version string, pid int, waitErr error, retryCount, maxR
 	}
 
 	log.Printf("OWLCMS restart decision for %s (PID: %d): %s", version, pid, strings.Join(details, ", "))
-	return willRestart
+	return willRestart, nextEnv
 }
 
 type owlcmsLaunchParams struct {
@@ -352,7 +357,7 @@ func recordOwlcmsStart(pid int, version, port string, daemon bool) *shared.Runti
 
 	SaveLastRunVersion(version)
 
-	metadata, err := shared.WriteRuntimeMetadata(runtimeMetadataPath(), pid, version, port, daemon)
+	metadata, err := shared.WriteRuntimeMetadataWithToken(runtimeMetadataPath(), pid, version, port, daemon, controlPanelToken)
 	if err != nil {
 		log.Printf("Failed to write OWLCMS runtime metadata: %v", err)
 		return nil
@@ -437,6 +442,35 @@ func LaunchForeground(version string) error {
 // on cmd.Wait(). It is used by command-line foreground launches and by
 // systemd/docker-style foreground supervision.
 func launchSupervisedForeground(version string, params *owlcmsLaunchParams, daemon bool) error {
+	for {
+		waitErr, err := runSupervisedOnce(version, params, daemon)
+		if err != nil {
+			return err
+		}
+		if waitErr == nil {
+			log.Printf("LaunchSupervisedForeground: OWLCMS %s exited normally (code 0)", version)
+			return nil
+		}
+		restartable, nextEnv := restartDecision(params.Env, waitErr)
+		if restartable && launchesStartupImport(params.Env) && !launchesStartupImport(nextEnv) {
+			// OWLCMS asked for a restart after its startup load: relaunch here, without OWLCMS_LOADJSON, so that
+			// a supervisor restarting this process does not load the startup file again
+			log.Printf("LaunchSupervisedForeground: OWLCMS %s restart after its startup load; relaunching without %s", version, loadJSONEnv)
+			params.Env = nextEnv
+			continue
+		}
+		if !restartable {
+			log.Printf("LaunchSupervisedForeground: OWLCMS %s exited, not restarted: %v", version, waitErr)
+			return nil
+		}
+		log.Printf("LaunchSupervisedForeground: OWLCMS %s exited with restartable failure: %v", version, waitErr)
+		return waitErr
+	}
+}
+
+// runSupervisedOnce starts OWLCMS, waits for readiness, then blocks until it exits.
+// It returns the cmd.Wait() result, or an error if OWLCMS could not be started.
+func runSupervisedOnce(version string, params *owlcmsLaunchParams, daemon bool) (error, error) {
 	cmd := buildOwlcmsCommand(params, false)
 	shared.ConfigureNoConsoleWindow(cmd)
 	cmd.Env = params.Env
@@ -446,7 +480,7 @@ func launchSupervisedForeground(version string, params *owlcmsLaunchParams, daem
 
 	log.Printf("LaunchSupervisedForeground: command %v in %s", cmd.Args, params.VersionDir)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start OWLCMS %s: %w", version, err)
+		return nil, fmt.Errorf("failed to start OWLCMS %s: %w", version, err)
 	}
 
 	pid := cmd.Process.Pid
@@ -475,20 +509,8 @@ func launchSupervisedForeground(version string, params *owlcmsLaunchParams, daem
 	// Block until the process exits.
 	waitErr := cmd.Wait()
 	clearRuntimeState()
-
-	if waitErr == nil {
-		log.Printf("LaunchSupervisedForeground: OWLCMS %s exited normally (code 0)", version)
-		return nil
-	}
-
-	restartable := shared.ShouldRestartProcess(waitErr)
-	if !restartable {
-		log.Printf("LaunchSupervisedForeground: OWLCMS %s (PID %d) exited intentionally: %v", version, pid, waitErr)
-		return nil
-	}
-
-	log.Printf("LaunchSupervisedForeground: OWLCMS %s (PID %d) exited with restartable failure: %v", version, pid, waitErr)
-	return waitErr
+	log.Printf("LaunchSupervisedForeground: OWLCMS %s (PID %d) exited: %v", version, pid, waitErr)
+	return waitErr, nil
 }
 
 // launchDaemonDetached starts OWLCMS detached using MainWrapper and setsid.
@@ -720,6 +742,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 			shared.OpenFileExplorer(appDir)
 		}
 		appDirLink.Show()
+		configureTokenUI()
 		configureTrackerConnectionUI(version)
 		configureTailLogLink(version, appDir)
 
@@ -772,6 +795,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 					shared.OpenFileExplorer(appDir)
 				}
 				appDirLink.Show()
+				configureTokenUI()
 				configureTrackerConnectionUI(version)
 				configureTailLogLink(version, appDir)
 			})
@@ -791,7 +815,9 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 			//   exit non-zero (e.g. 1)   → restart (database import, or unexpected error)
 			//   SIGTERM / SIGINT          → don't restart (intentional stop by user)
 			//   abnormal signal (SIGSEGV) → restart (JVM native crash)
-			if logRestartDecision(version, pid, err, retryCount, maxRestartRetries) {
+			// plus the startup-load rules of restartDecision (exit 75, OWLCMS_LOADJSON)
+			if restart, nextEnv := logRestartDecision(version, pid, err, params.Env, retryCount, maxRestartRetries); restart {
+				params.Env = nextEnv
 				attemptNum := retryCount + 1
 				log.Printf("OWLCMS %s (PID: %d) exited unexpectedly (%v); restarting in %s (attempt %d/%d)\n", version, pid, err, restartDelay, attemptNum, maxRestartRetries)
 				currentProcess = nil
@@ -802,6 +828,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 					launchButton.Hide()
 					urlLink.Hide()
 					trackerConnectionRow.Hide()
+					tokenRow.Hide()
 					appDirLink.Hide()
 					if tailLogLink != nil {
 						tailLogLink.Hide()
@@ -841,6 +868,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 
 				urlLink.Hide()
 				trackerConnectionRow.Hide()
+				tokenRow.Hide()
 				appDirLink.Hide()
 				if tailLogLink != nil {
 					tailLogLink.Hide()

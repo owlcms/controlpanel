@@ -39,6 +39,9 @@ var (
 	trackerConnectionLabel    *widget.Label
 	trackerURLLink            *widget.Hyperlink
 	trackerConnectionRow      *fyne.Container
+	tokenLabel                *widget.Label
+	tokenCopyButton           *widget.Button
+	tokenRow                  *fyne.Container
 	appDirLink                *widget.Hyperlink
 	tailLogLink               *widget.Hyperlink
 	startupLogText            *widget.Entry
@@ -83,6 +86,16 @@ func CreateTab(w fyne.Window, _ fyne.App) *fyne.Container {
 	trackerConnectionRow = container.NewHBox(trackerConnectionLabel, trackerURLLink)
 	trackerConnectionRow.Hide()
 
+	tokenLabel = widget.NewLabel("")
+	tokenCopyButton = widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() {
+		if token := runningOwlcmsToken(); token != "" {
+			fyne.CurrentApp().Clipboard().SetContent(token)
+		}
+	})
+	tokenCopyButton.Importance = widget.LowImportance
+	tokenRow = container.NewHBox(tokenLabel, tokenCopyButton)
+	tokenRow.Hide()
+
 	// Create application directory hyperlink
 	appDirLink = widget.NewHyperlink("", nil)
 	appDirLink.Hide()
@@ -94,7 +107,7 @@ func CreateTab(w fyne.Window, _ fyne.App) *fyne.Container {
 	// Initialize containers
 	downloadContainer = container.NewVBox()
 	versionContainer = container.NewStack()
-	stopContainer = container.NewVBox(widget.NewSeparator(), stopButton, statusRow, trackerConnectionRow, appDirLink, tailLogLink)
+	stopContainer = container.NewVBox(widget.NewSeparator(), stopButton, statusRow, tokenRow, trackerConnectionRow, appDirLink, tailLogLink)
 
 	// Initialize download titles
 	updateTitle = widget.NewRichTextFromMarkdown("")
@@ -931,6 +944,7 @@ func restoreOwlcmsRunningUI(version, port string, pid int) {
 	urlLink.SetURLFromString(url)
 	urlLink.SetText("Open OWLCMS in a browser")
 	urlLink.Show()
+	configureTokenUI()
 	configureTrackerConnectionUI(version)
 
 	appDir := filepath.Join(installDir, version)
@@ -943,6 +957,17 @@ func restoreOwlcmsRunningUI(version, port string, pid int) {
 	configureTailLogLink(version, appDir)
 	hideStartupLogArea()
 	stopContainer.Refresh()
+}
+
+// configureTokenUI offers to copy the token the running OWLCMS expects for maintenance requests (simulation page,
+// stop); the token itself is not displayed. The row is hidden when that OWLCMS was launched without one.
+func configureTokenUI() {
+	if runningOwlcmsToken() == "" {
+		tokenRow.Hide()
+		return
+	}
+	tokenLabel.SetText("Control panel token")
+	tokenRow.Show()
 }
 
 func configureTrackerConnectionUI(version string) {

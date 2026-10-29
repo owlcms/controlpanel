@@ -26,6 +26,9 @@ type RuntimeMetadata struct {
 	Daemon            bool   `json:"daemon"`
 	ProcessStartTicks uint64 `json:"processStartTicks"`
 	StartedAt         string `json:"startedAt"`
+	// Token is the control panel token given to the process at launch, kept so a restarted control panel can
+	// show it and present it on stop. The file is then readable by its owner only.
+	Token string `json:"token,omitempty"`
 }
 
 const RunAsDaemonEnv = "CONTROLPANEL_RUN_AS_DAEMON"
@@ -68,6 +71,12 @@ func LoadRuntimeMetadata(filePath string) (*RuntimeMetadata, error) {
 
 // WriteRuntimeMetadata writes runtime metadata atomically.
 func WriteRuntimeMetadata(filePath string, pid int, version, port string, daemon bool) (*RuntimeMetadata, error) {
+	return WriteRuntimeMetadataWithToken(filePath, pid, version, port, daemon, "")
+}
+
+// WriteRuntimeMetadataWithToken writes runtime metadata atomically, including the control panel token given to
+// the process; with a token, the file is readable by its owner only.
+func WriteRuntimeMetadataWithToken(filePath string, pid int, version, port string, daemon bool, token string) (*RuntimeMetadata, error) {
 	if err := EnsureDir0755(filepath.Dir(filePath)); err != nil {
 		return nil, fmt.Errorf("creating runtime metadata directory: %w", err)
 	}
@@ -84,6 +93,7 @@ func WriteRuntimeMetadata(filePath string, pid int, version, port string, daemon
 		Daemon:            daemon,
 		ProcessStartTicks: startTicks,
 		StartedAt:         time.Now().UTC().Format(time.RFC3339),
+		Token:             token,
 	}
 
 	content, err := json.MarshalIndent(metadata, "", "  ")
@@ -91,8 +101,13 @@ func WriteRuntimeMetadata(filePath string, pid int, version, port string, daemon
 		return nil, fmt.Errorf("marshal runtime metadata: %w", err)
 	}
 
+	mode := os.FileMode(0644)
+	if token != "" {
+		mode = 0600
+	}
 	tempPath := filePath + ".tmp"
-	if err := os.WriteFile(tempPath, content, 0644); err != nil {
+	_ = os.Remove(tempPath)
+	if err := os.WriteFile(tempPath, content, mode); err != nil {
 		return nil, fmt.Errorf("write runtime metadata temp file: %w", err)
 	}
 

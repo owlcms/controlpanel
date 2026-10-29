@@ -38,6 +38,35 @@ func TestCheckDaemonRunningDetectsRecordedProcess(t *testing.T) {
 	}
 }
 
+func TestRuntimeMetadataKeepsTheTokenForItsOwnerOnly(t *testing.T) {
+	metadataPath := filepath.Join(t.TempDir(), "runtime.json")
+	if _, err := WriteRuntimeMetadataWithToken(metadataPath, os.Getpid(), "test", "8080", false, "Ab3-xY9_kLmN"); err != nil {
+		t.Fatalf("write runtime metadata: %v", err)
+	}
+
+	got, running := CheckDaemonRunning(metadataPath)
+	if !running || got == nil || got.Token != "Ab3-xY9_kLmN" {
+		t.Fatalf("CheckDaemonRunning returned %+v (running=%v), want the recorded token", got, running)
+	}
+	if GetGoos() != "windows" {
+		info, err := os.Stat(metadataPath)
+		if err != nil {
+			t.Fatalf("stat runtime metadata: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Fatalf("runtime metadata with a token has mode %o, want 600", perm)
+		}
+	}
+
+	if _, err := WriteRuntimeMetadata(metadataPath, os.Getpid(), "test", "8080", false); err != nil {
+		t.Fatalf("rewrite runtime metadata: %v", err)
+	}
+	got, _ = CheckDaemonRunning(metadataPath)
+	if got == nil || got.Token != "" {
+		t.Fatalf("metadata written without a token kept %q", got.Token)
+	}
+}
+
 func TestCheckDaemonRunningDoesNotAdoptForeignPortOwner(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

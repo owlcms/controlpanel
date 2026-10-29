@@ -38,6 +38,15 @@ func newControlPanelToken() string {
 	return string(b)
 }
 
+// runningOwlcmsToken is the token the running OWLCMS was given: the one recorded at launch, possibly by an earlier
+// control panel run, or empty when that OWLCMS was launched without one.
+func runningOwlcmsToken() string {
+	if activeRuntime != nil {
+		return activeRuntime.Token
+	}
+	return controlPanelToken
+}
+
 // StopProcessByPort asks an externally/reclaimed OWLCMS process to stop itself
 // before falling back to signal-style OS termination. It does not force-kill:
 // explicit in-app restart exits 1, while external stops must remain clean.
@@ -78,8 +87,8 @@ func requestOwlcmsStop(port string) error {
 	if err != nil {
 		return err
 	}
-	if controlPanelToken != "" {
-		req.Header.Set("Authorization", "Bearer "+controlPanelToken)
+	if token := runningOwlcmsToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := client.Do(req)

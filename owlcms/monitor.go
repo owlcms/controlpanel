@@ -102,6 +102,7 @@ func stopProcess(version string, stopBtn *widget.Button, downloadGroup, versionC
 			setOwlcmsTabMode(w)
 
 			urlLink.Hide()
+			tokenRow.Hide()
 			appDirLink.Hide()
 			if tailLogLink != nil {
 				tailLogLink.Hide()
