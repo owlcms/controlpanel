@@ -1,6 +1,7 @@
 package owlcms
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,30 @@ import (
 )
 
 const controlPanelStopPath = "/controlpanel/stop"
+
+// controlPanelTokenEnv gives OWLCMS a token at launch; presenting it on stop proves the
+// request comes from this control panel run. OWLCMS falls back to a local-connection
+// check when it was not launched with a token.
+const controlPanelTokenEnv = "OWLCMS_CONTROLPANELTOKEN"
+
+// controlPanelToken is random, generated once per control panel run, and never logged.
+// Same format as OWLCMS account tokens: 12 characters from a 64-symbol URL-safe alphabet (72 bits).
+var controlPanelToken = newControlPanelToken()
+
+const controlPanelTokenAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+func newControlPanelToken() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		log.Printf("cannot generate the OWLCMS stop token: %v", err)
+		return ""
+	}
+	for i := range b {
+		// 64 symbols divide 256 evenly, so masking keeps the distribution uniform
+		b[i] = controlPanelTokenAlphabet[b[i]&63]
+	}
+	return string(b)
+}
 
 // StopProcessByPort asks an externally/reclaimed OWLCMS process to stop itself
 // before falling back to signal-style OS termination. It does not force-kill:
@@ -52,6 +77,9 @@ func requestOwlcmsStop(port string) error {
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return err
+	}
+	if controlPanelToken != "" {
+		req.Header.Set("Authorization", "Bearer "+controlPanelToken)
 	}
 
 	resp, err := client.Do(req)

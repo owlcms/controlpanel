@@ -279,6 +279,9 @@ func prepareOwlcmsLaunch(version string, embeddedMQTTOverride *bool) (*owlcmsLau
 	lv := shared.GetLauncherVersionSemver()
 	env = shared.UpsertEnv(env, "OWLCMS_LAUNCHER", lv)
 	env = shared.UpsertEnv(env, "OWLCMS_CONTROLPANEL", lv)
+	if controlPanelToken != "" {
+		env = shared.UpsertEnv(env, controlPanelTokenEnv, controlPanelToken)
+	}
 	effectiveEnv := cloneProperties(mergedEnv)
 	if embeddedMQTTOverride != nil {
 		value := "false"
