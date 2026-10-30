@@ -11,6 +11,9 @@ The control panel is installed once. It will automatically download the correct 
 
 ### 3.9.1
 
+- OWLCMS is given a new control panel token at each launch, restarts included. The OWLCMS tab has a copy icon for it; the token is not displayed.
+  - Log in to OWLCMS as `admin` with this token as the password to set the admin password, the first time or when it is forgotten.
+
 - REPL: `secret encrypt <keyname> <value>` encrypts with the key file `~/.owlcms/<keyname>`, created on first use, so that keys given to other programs are kept apart from the control panel's own key. For example, `secret encrypt apiprotection.aes <value>` for the API keys that OWLCMS decrypts with `~/.owlcms/apiprotection.aes`.
 
 ### 3.9.0

@@ -15,16 +15,18 @@ import (
 const controlPanelStopPath = "/controlpanel/stop"
 
 // controlPanelTokenEnv gives OWLCMS a token at launch; presenting it on stop proves the
-// request comes from this control panel run. OWLCMS falls back to a local-connection
-// check when it was not launched with a token.
+// request comes from this control panel. It is also the emergency admin password. OWLCMS falls
+// back to a local-connection check when it was not launched with a token.
 const controlPanelTokenEnv = "OWLCMS_CONTROLPANELTOKEN"
 
-// controlPanelToken is random, generated once per control panel run, and never logged.
-// Same format as OWLCMS account tokens: 12 characters from a 64-symbol URL-safe alphabet (72 bits).
-var controlPanelToken = newControlPanelToken()
+// lastLaunchToken is the token given to the most recent OWLCMS launch, restarts included. Each launch gets a new
+// random token, so a token used for an emergency login stops working once OWLCMS restarts. Never logged.
+var lastLaunchToken string
 
 const controlPanelTokenAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
+// newControlPanelToken has the same format as OWLCMS account tokens: 12 characters from a 64-symbol URL-safe
+// alphabet (72 bits).
 func newControlPanelToken() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
@@ -38,13 +40,26 @@ func newControlPanelToken() string {
 	return string(b)
 }
 
+// withNewControlPanelToken returns a copy of env for one OWLCMS launch, carrying a new token, and that token.
+// The token is set last so that no other setting can replace it. Without a token (generation failed), OWLCMS is
+// launched without one.
+func withNewControlPanelToken(env []string) ([]string, string) {
+	next := append([]string(nil), env...)
+	token := newControlPanelToken()
+	lastLaunchToken = token
+	if token == "" {
+		return removeEnvKey(next, controlPanelTokenEnv), ""
+	}
+	return shared.UpsertEnv(next, controlPanelTokenEnv, token), token
+}
+
 // runningOwlcmsToken is the token the running OWLCMS was given: the one recorded at launch, possibly by an earlier
 // control panel run, or empty when that OWLCMS was launched without one.
 func runningOwlcmsToken() string {
 	if activeRuntime != nil {
 		return activeRuntime.Token
 	}
-	return controlPanelToken
+	return lastLaunchToken
 }
 
 // StopProcessByPort asks an externally/reclaimed OWLCMS process to stop itself

@@ -284,9 +284,6 @@ func prepareOwlcmsLaunch(version string, embeddedMQTTOverride *bool) (*owlcmsLau
 	lv := shared.GetLauncherVersionSemver()
 	env = shared.UpsertEnv(env, "OWLCMS_LAUNCHER", lv)
 	env = shared.UpsertEnv(env, "OWLCMS_CONTROLPANEL", lv)
-	if controlPanelToken != "" {
-		env = shared.UpsertEnv(env, controlPanelTokenEnv, controlPanelToken)
-	}
 	effectiveEnv := cloneProperties(mergedEnv)
 	if embeddedMQTTOverride != nil {
 		value := "false"
@@ -348,7 +345,8 @@ func buildOwlcmsCommand(params *owlcmsLaunchParams, useDaemonWrapper bool) *exec
 }
 
 // recordOwlcmsStart writes the PID file and runtime metadata after a successful cmd.Start().
-func recordOwlcmsStart(pid int, version, port string, daemon bool) *shared.RuntimeMetadata {
+// token is the control panel token given to this launch, kept for stop and the copy icon.
+func recordOwlcmsStart(pid int, version, port string, daemon bool, token string) *shared.RuntimeMetadata {
 	if err := os.WriteFile(pidFilePath, fmt.Appendf(nil, "%d\n", pid), 0644); err != nil {
 		log.Printf("Failed to write PID to PID file: %v\n", err)
 	} else {
@@ -357,7 +355,7 @@ func recordOwlcmsStart(pid int, version, port string, daemon bool) *shared.Runti
 
 	SaveLastRunVersion(version)
 
-	metadata, err := shared.WriteRuntimeMetadataWithToken(runtimeMetadataPath(), pid, version, port, daemon, controlPanelToken)
+	metadata, err := shared.WriteRuntimeMetadataWithToken(runtimeMetadataPath(), pid, version, port, daemon, token)
 	if err != nil {
 		log.Printf("Failed to write OWLCMS runtime metadata: %v", err)
 		return nil
@@ -473,7 +471,8 @@ func launchSupervisedForeground(version string, params *owlcmsLaunchParams, daem
 func runSupervisedOnce(version string, params *owlcmsLaunchParams, daemon bool) (error, error) {
 	cmd := buildOwlcmsCommand(params, false)
 	shared.ConfigureNoConsoleWindow(cmd)
-	cmd.Env = params.Env
+	env, token := withNewControlPanelToken(params.Env)
+	cmd.Env = env
 	cmd.Dir = params.VersionDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -484,7 +483,7 @@ func runSupervisedOnce(version string, params *owlcmsLaunchParams, daemon bool) 
 	}
 
 	pid := cmd.Process.Pid
-	activeRuntime = recordOwlcmsStart(pid, version, params.TargetPort, daemon)
+	activeRuntime = recordOwlcmsStart(pid, version, params.TargetPort, daemon, token)
 	log.Printf("LaunchSupervisedForeground: OWLCMS %s (PID %d), waiting for port %s...", version, pid, params.TargetPort)
 
 	// Wait for the port to come up before declaring success.
@@ -521,7 +520,8 @@ func launchDaemonDetached(version string, params *owlcmsLaunchParams) error {
 	cmd := buildOwlcmsCommand(params, useDaemonWrapper)
 	shared.ConfigureNoConsoleWindow(cmd)
 	shared.ConfigureDetachedDaemonProcess(cmd, useDaemonWrapper)
-	cmd.Env = params.Env
+	env, token := withNewControlPanelToken(params.Env)
+	cmd.Env = env
 	cmd.Dir = params.VersionDir
 
 	log.Printf("LaunchDaemon: command %v in %s", cmd.Args, params.VersionDir)
@@ -530,7 +530,7 @@ func launchDaemonDetached(version string, params *owlcmsLaunchParams) error {
 	}
 
 	pid := cmd.Process.Pid
-	activeRuntime = recordOwlcmsStart(pid, version, params.TargetPort, true)
+	activeRuntime = recordOwlcmsStart(pid, version, params.TargetPort, true, token)
 
 	log.Printf("LaunchDaemon: OWLCMS %s (PID %d), waiting for port %s...", version, pid, params.TargetPort)
 	deadline := time.Now().Add(60 * time.Second)
@@ -699,7 +699,9 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 	launchAttempt = func(retryCount int) {
 		cmd := buildOwlcmsCommand(params, false)
 		shared.ConfigureNoConsoleWindow(cmd)
-		cmd.Env = params.Env
+		// a new token at each launch, restarts included
+		env, token := withNewControlPanelToken(params.Env)
+		cmd.Env = env
 		cmd.Dir = params.VersionDir
 
 		// Remove startup.log if it exists to ensure fresh log output
@@ -722,7 +724,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 		}
 
 		javaPID = cmd.Process.Pid
-		activeRuntime = recordOwlcmsStart(javaPID, version, targetPort, false)
+		activeRuntime = recordOwlcmsStart(javaPID, version, targetPort, false, token)
 
 		log.Printf("Launching OWLCMS %s (PID: %d), waiting for port %s...\n", version, javaPID, targetPort)
 		statusLabel.SetText(fmt.Sprintf("Starting OWLCMS %s (PID: %d), waiting for port %s.\nFull startup can take up to 30 seconds.", version, javaPID, targetPort))
