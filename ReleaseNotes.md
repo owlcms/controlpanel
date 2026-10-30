@@ -9,7 +9,7 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
-### 3.9.1
+### 3.10.0
 
 - OWLCMS is given a new control panel token at each launch, restarts included. The OWLCMS tab has a copy icon for it; the token is not displayed.
   - Log in to OWLCMS as `admin` with this token as the password to set the admin password, the first time or when it is forgotten.
