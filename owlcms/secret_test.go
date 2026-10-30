@@ -31,7 +31,7 @@ func TestSecretRoundTrip(t *testing.T) {
 	if !strings.HasPrefix(encrypted, "enc:v1:") || strings.Contains(encrypted, "s3cret") {
 		t.Fatalf("unexpected encrypted value %q", encrypted)
 	}
-	info, err := os.Stat(filepath.Join(home, ".owlcms", "key"))
+	info, err := os.Stat(filepath.Join(home, ".owlcms", "controlpanel.aes"))
 	if err != nil {
 		t.Fatalf("installation key not created: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestSecretRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSecretUsesLegacyInstallationKeyFile(t *testing.T) {
+func TestSecretMigratesTheInstallationKeyFileOf380(t *testing.T) {
 	home := useTempHome(t)
 	legacyPath := filepath.Join(home, ".owlcms")
 	legacyKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)) + "\n"
@@ -65,15 +65,43 @@ func TestSecretUsesLegacyInstallationKeyFile(t *testing.T) {
 		t.Fatalf("encrypt: %v", err)
 	}
 	info, err := os.Stat(legacyPath)
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatalf("legacy key file must be kept as a file: %v", err)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("~/.owlcms must become a folder: %v", err)
 	}
-	data, err := os.ReadFile(legacyPath)
+	data, err := os.ReadFile(filepath.Join(legacyPath, "controlpanel.aes"))
 	if err != nil || string(data) != legacyKey {
-		t.Fatalf("legacy key file must be unchanged, got %q, %v", data, err)
+		t.Fatalf("the legacy key must be moved unchanged, got %q, %v", data, err)
 	}
 	plain, err := shared.DecryptSecret(encrypted)
 	if err != nil || plain != "s3cret" {
+		t.Fatalf("decrypt = %q, %v", plain, err)
+	}
+}
+
+func TestSecretMigratesTheKeyFileOfEarlierVersions(t *testing.T) {
+	home := useTempHome(t)
+	folder := filepath.Join(home, ".owlcms")
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+	oldKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)) + "\n"
+	if err := os.WriteFile(filepath.Join(folder, "key"), []byte(oldKey), 0o600); err != nil {
+		t.Fatalf("write old key: %v", err)
+	}
+	encrypted, err := shared.EncryptSecret("saved before the rename")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(folder, "key")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("~/.owlcms/key must be renamed, stat err = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(folder, "controlpanel.aes"))
+	if err != nil || string(data) != oldKey {
+		t.Fatalf("the key must be moved unchanged, got %q, %v", data, err)
+	}
+	plain, err := shared.DecryptSecret(encrypted)
+	if err != nil || plain != "saved before the rename" {
 		t.Fatalf("decrypt = %q, %v", plain, err)
 	}
 }

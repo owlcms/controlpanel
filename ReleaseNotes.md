@@ -11,6 +11,8 @@ The control panel is installed once. It will automatically download the correct 
 
 ### 3.10.0
 
+- The control panel's own encryption key is now `~/.owlcms/controlpanel.aes`, next to `apiprotection.aes` and `auditkey.pem`. The key left by an earlier version (`~/.owlcms/key`, or the file `~/.owlcms` of 3.8.0) is moved there unchanged, so saved keys stay readable.
+
 - OWLCMS is given a new control panel token at each launch, restarts included. The OWLCMS tab has a copy icon for it; the token is not displayed.
   - Log in to OWLCMS as `admin` with this token as the password to set the admin password, the first time or when it is forgotten.
 

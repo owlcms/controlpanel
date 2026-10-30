@@ -22,18 +22,52 @@ var namedKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
 // ErrSecretReentryRequired means a saved secret cannot be used on this installation and must be typed again.
 var ErrSecretReentryRequired = errors.New("the saved key must be entered again")
 
-// installationKeyPath is outside the install folder so copying that folder does not carry the key.
-// Control panel 3.8.0 stored the key as the file ~/.owlcms; that file is still used when present.
+// installationKeyName is the control panel's own key in ~/.owlcms. It is outside the install folder so copying that
+// folder does not carry the key.
+const installationKeyName = "controlpanel.aes"
+
+// installationKeyPath returns ~/.owlcms/controlpanel.aes, after moving there a key left by an earlier control panel:
+// ~/.owlcms/key (3.8.1 to 3.9.x), or the file ~/.owlcms itself (3.8.0). The key is unchanged, so saved secrets stay
+// readable.
 func installationKeyPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locating home directory: %w", err)
 	}
-	legacyPath := filepath.Join(home, ".owlcms")
-	if info, err := os.Stat(legacyPath); err == nil && info.Mode().IsRegular() {
-		return legacyPath, nil
+	folder := filepath.Join(home, ".owlcms")
+	keyPath := filepath.Join(folder, installationKeyName)
+	if err := migrateInstallationKey(folder, keyPath); err != nil {
+		return "", err
 	}
-	return filepath.Join(legacyPath, "key"), nil
+	return keyPath, nil
+}
+
+func migrateInstallationKey(folder, keyPath string) error {
+	if info, err := os.Stat(folder); err == nil && info.Mode().IsRegular() {
+		// 3.8.0: the file ~/.owlcms is the key. Move it aside first, so it is never lost, then into the new folder.
+		aside := folder + ".key-migration"
+		if err := os.Rename(folder, aside); err != nil {
+			return fmt.Errorf("moving legacy encryption key %s: %w", folder, err)
+		}
+		if err := os.MkdirAll(folder, 0o700); err != nil {
+			_ = os.Rename(aside, folder)
+			return fmt.Errorf("creating encryption key folder %s: %w", folder, err)
+		}
+		if err := os.Rename(aside, keyPath); err != nil {
+			return fmt.Errorf("moving legacy encryption key to %s: %w", keyPath, err)
+		}
+		return nil
+	}
+	if _, err := os.Stat(keyPath); err == nil {
+		return nil
+	}
+	oldPath := filepath.Join(folder, "key")
+	if _, err := os.Stat(oldPath); err == nil {
+		if err := os.Rename(oldPath, keyPath); err != nil {
+			return fmt.Errorf("renaming encryption key %s to %s: %w", oldPath, keyPath, err)
+		}
+	}
+	return nil
 }
 
 func loadInstallationKey(create bool) ([]byte, error) {
@@ -46,8 +80,8 @@ func loadInstallationKey(create bool) ([]byte, error) {
 
 // NamedKeyPath returns ~/.owlcms/<keyName>, for a key file kept apart from the control panel's own installation key.
 func NamedKeyPath(keyName string) (string, error) {
-	if !namedKeyPattern.MatchString(keyName) || keyName == "key" {
-		return "", fmt.Errorf("invalid key name %q: use letters, digits, '.', '_' or '-', not starting with '.', and not \"key\"", keyName)
+	if !namedKeyPattern.MatchString(keyName) || keyName == "key" || keyName == installationKeyName {
+		return "", fmt.Errorf("invalid key name %q: use letters, digits, '.', '_' or '-', not starting with '.', and not %q or \"key\"", keyName, installationKeyName)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -123,7 +157,7 @@ func IsSecretSet(value string) bool {
 	return strings.TrimSpace(value) != ""
 }
 
-// EncryptSecret encrypts plain with the installation key, creating ~/.owlcms/key on first use.
+// EncryptSecret encrypts plain with the installation key, creating ~/.owlcms/controlpanel.aes on first use.
 // A blank key yields an empty value.
 func EncryptSecret(plain string) (string, error) {
 	plain = strings.TrimSpace(plain)

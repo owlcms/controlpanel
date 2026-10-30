@@ -283,7 +283,7 @@ func TestREPLSecretEncrypt(t *testing.T) {
 	if os.PathSeparator == '/' && info.Mode().Perm() != 0o600 {
 		t.Fatalf("named key permissions = %v, want 0600", info.Mode().Perm())
 	}
-	installationKey := filepath.Join(home, ".owlcms", "key")
+	installationKey := filepath.Join(home, ".owlcms", "controlpanel.aes")
 	if _, err := os.Stat(installationKey); !os.IsNotExist(err) {
 		t.Fatalf("secret encrypt must not create the control panel key, stat err = %v", err)
 	}
@@ -304,7 +304,8 @@ func TestREPLSecretEncrypt(t *testing.T) {
 	}
 
 	for _, command := range []string{"secret encrypt", "secret encrypt s3cret", "secret encrypt apiprotection.aes ''",
-		"secret encrypt key s3cret", "secret encrypt ../escape s3cret", "secret encrypt .hidden s3cret",
+		"secret encrypt key s3cret", "secret encrypt controlpanel.aes s3cret", "secret encrypt ../escape s3cret",
+		"secret encrypt .hidden s3cret",
 		"secret decrypt apiprotection.aes x"} {
 		if _, err := executeREPLLine(command, &replSession{}, &output); err == nil {
 			t.Fatalf("%q must be rejected", command)
