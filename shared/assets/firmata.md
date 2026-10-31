@@ -5,7 +5,7 @@ Note. This is an optional module.
 ##### 
 
 You need to run this module if you have built your own MQTT refereeing devices
-using the plans provided in the [owlcms-firmata](https://github.com/owlcms/owlcms-firmata?tab=readme-ov-file#owlcms-firmata) repository.
+using the plans provided in the [firmata](https://github.com/owlcms/firmata?tab=readme-ov-file#owlcms-firmata) repository.
 
 #####
 

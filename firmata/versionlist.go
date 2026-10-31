@@ -438,9 +438,9 @@ func updateVersion(existingVersion string, targetVersion string, w fyne.Window) 
 	// Download and extract the version given by string
 	var urlPrefix string
 	if containsPreReleaseTag(targetVersion) {
-		urlPrefix = "https://github.com/jflamy/owlcms-firmata/releases/download"
+		urlPrefix = "https://github.com/owlcms/firmata/releases/download"
 	} else {
-		urlPrefix = "https://github.com/jflamy/owlcms-firmata/releases/download"
+		urlPrefix = "https://github.com/owlcms/firmata/releases/download"
 	}
 	fileName := "owlcms-firmata.jar"
 	jarURL := fmt.Sprintf("%s/%s/%s", urlPrefix, targetVersion, fileName)

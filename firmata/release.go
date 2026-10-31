@@ -40,7 +40,7 @@ var (
 
 func fetchReleases() ([]string, error) {
 	urls := []string{
-		"https://api.github.com/repos/owlcms/owlcms-firmata/releases",
+		"https://api.github.com/repos/owlcms/firmata/releases",
 	}
 
 	var allReleasesLocal []Release
@@ -142,9 +142,9 @@ func createReleaseDropdown(w fyne.Window) (*widget.Select, *fyne.Container) {
 		version := shared.ExtractSemver(selected)
 		var urlPrefix string
 		if containsPreReleaseTag(version) {
-			urlPrefix = "https://github.com/jflamy/owlcms-firmata/releases/download"
+			urlPrefix = "https://github.com/owlcms/firmata/releases/download"
 		} else {
-			urlPrefix = "https://github.com/jflamy/owlcms-firmata/releases/download"
+			urlPrefix = "https://github.com/owlcms/firmata/releases/download"
 		}
 		fileName := "owlcms-firmata.jar"
 		zipURL := fmt.Sprintf("%s/%s/%s", urlPrefix, version, fileName)

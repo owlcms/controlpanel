@@ -673,9 +673,9 @@ func ShowDownloadables() {
 func downloadAndInstallVersion(version string, w fyne.Window) {
 	var urlPrefix string
 	if containsPreReleaseTag(version) {
-		urlPrefix = "https://github.com/jflamy/owlcms-firmata/releases/download"
+		urlPrefix = "https://github.com/owlcms/firmata/releases/download"
 	} else {
-		urlPrefix = "https://github.com/jflamy/owlcms-firmata/releases/download"
+		urlPrefix = "https://github.com/owlcms/firmata/releases/download"
 	}
 	fileName := "owlcms-firmata.jar"
 	zipURL := fmt.Sprintf("%s/%s/%s", urlPrefix, version, fileName)
@@ -780,7 +780,7 @@ func checkForNewerVersion() {
 				releaseVersion, err := shared.NewVersionForComparison(release)
 				if err == nil && releaseVersion.GreaterThan(latestInstalledVersion) {
 					log.Printf("Found newer version: %s\n", release)
-					releaseURL := fmt.Sprintf("https://github.com/jflamy/owlcms-firmata/releases/tag/%s", releaseVersion)
+					releaseURL := fmt.Sprintf("https://github.com/owlcms/firmata/releases/tag/%s", releaseVersion)
 					versionToInstall := shared.ExtractSemver(release)
 
 					var versionType string
@@ -825,7 +825,7 @@ func checkForNewerVersion() {
 			}
 
 			// If we get here, no newer version was found
-			releaseURL := fmt.Sprintf("https://github.com/jflamy/owlcms-firmata/releases/tag/%s", latestInstalled)
+			releaseURL := fmt.Sprintf("https://github.com/owlcms/firmata/releases/tag/%s", latestInstalled)
 			parsedURL, _ := url.Parse(releaseURL)
 			releaseNotesLink := widget.NewHyperlink("Release Notes", parsedURL)
 			// Ensure hyperlink visible for installed prerelease/stable
