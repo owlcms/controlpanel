@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       notarize:
-        description: 'Notarize and staple the macOS DMGs (use at RC/final stage)'
+        description: 'Notarize and staple the macOS DMGs'
         required: false
         type: boolean
-        default: false
+        default: true
 
 env:
   BUILD_MAC: true

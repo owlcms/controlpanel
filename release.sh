@@ -1,6 +1,6 @@
 #!/bin/bash
 # Default release tag (can be overridden by first CLI argument)
-TAG="3.10.0-alpha01"
+TAG="3.10.0-alpha02"
 # =============================================================================
 # Release script for owlcms-controlpanel
 # Uses workflow_dispatch trigger with tag input parameter
@@ -113,12 +113,8 @@ START_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo "Previous run ID: $PREV_RUN_ID, Start time: $START_ISO"
 
 # Trigger the workflow
-# Notarize for release candidates and final releases; skip for alpha/beta to save time.
-if [[ "$TAG" != *"-"* || "$TAG" == *"-rc"* ]]; then
-    NOTARIZE=true
-else
-    NOTARIZE=false
-fi
+# Every release is notarized and stapled, prereleases included, so macOS opens the DMG without a warning.
+NOTARIZE=true
 echo "Triggering workflow dispatch with tag=$TAG (notarize=$NOTARIZE) on branch $BRANCH..."
 gh workflow run "$WORKFLOW_FILE" --repo "$REPO" --ref "$BRANCH" --field tag="$TAG" --field notarize="$NOTARIZE"
 
