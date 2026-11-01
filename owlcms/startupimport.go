@@ -42,6 +42,16 @@ func withoutStartupImport(env []string) []string {
 	return kept
 }
 
+// minCheckpointLaunchMajor is the first OWLCMS major version that starts from a checkpoints folder (OWLCMS_LOADJSON
+// naming a folder, exit code 75 after the load).
+const minCheckpointLaunchMajor = 69
+
+// canLaunchFromCheckpoint reports whether this OWLCMS version can be launched from a checkpoints folder.
+func canLaunchFromCheckpoint(version string) bool {
+	major, err := shared.ExtractMajorVersion(version)
+	return err == nil && major >= minCheckpointLaunchMajor
+}
+
 // checkpointExport returns the export OWLCMS would load from a checkpoints folder: the most recent .json directly in
 // it (OWLCMS_LOADJSON picks the newest one the same way), or an error saying why the folder cannot be used.
 func checkpointExport(folder string) (string, error) {

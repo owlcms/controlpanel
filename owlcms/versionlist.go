@@ -240,8 +240,8 @@ func createVersionOptionsButton(w fyne.Window, version string, launchButton, sto
 			showTrackerConnectionDialogForVersion(w, version)
 		}),
 	}
-	// offered only while the checkpoints folder holds an export
-	if folder := GetCheckpointFolder(); folder != "" {
+	// offered only while the checkpoints folder holds an export, and only for versions that can start from it
+	if folder := GetCheckpointFolder(); folder != "" && canLaunchFromCheckpoint(version) {
 		if export, err := checkpointExport(folder); err == nil {
 			menuItems = append(menuItems, fyne.NewMenuItemSeparator(), fyne.NewMenuItem("Launch from Checkpoint", func() {
 				confirmLaunchFromCheckpoint(w, version, folder, export, launchButton, stopBtn)

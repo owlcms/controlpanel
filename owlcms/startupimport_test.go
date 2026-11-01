@@ -99,3 +99,16 @@ func TestCheckpointExportIsTheNewestJsonDirectlyInTheFolder(t *testing.T) {
 		t.Fatalf("expected the newest top-level export, got %q, %v", export, err)
 	}
 }
+
+func TestOnlyOwlcms69AndLaterLaunchFromACheckpoint(t *testing.T) {
+	for _, version := range []string{"69.0.0", "69.0.0-beta01", "69.1.2-alpha03", "70.0.0", "69.0.0+build7"} {
+		if !canLaunchFromCheckpoint(version) {
+			t.Errorf("%s must offer Launch from Checkpoint", version)
+		}
+	}
+	for _, version := range []string{"68.2.1", "68.0.0-rc01", "4.33.0", "not-a-version"} {
+		if canLaunchFromCheckpoint(version) {
+			t.Errorf("%s must not offer Launch from Checkpoint", version)
+		}
+	}
+}
