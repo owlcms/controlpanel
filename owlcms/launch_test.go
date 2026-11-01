@@ -205,9 +205,10 @@ func TestApplyPropertiesToEnvSkipsControlPanelTrackerSettings(t *testing.T) {
 	props.Set(trackerConnectionURLSetting, "wss://tracker.example.com/ws")
 	props.Set(trackerConnectionPortSetting, "443")
 	props.Set(trackerConnectionDefaultEnabledKey, "false")
+	props.Set(checkpointFolderSetting, "/Users/me/checkpoints")
 
 	env := applyOwlcmsPropertiesToEnv(nil, props)
 	if len(env) != 0 {
-		t.Fatalf("expected control-panel tracker settings to stay out of OWLCMS environment, got %v", env)
+		t.Fatalf("expected control-panel settings to stay out of OWLCMS environment, got %v", env)
 	}
 }

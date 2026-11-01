@@ -209,6 +209,7 @@ func applyOwlcmsPropertiesToEnv(env []string, props *properties.Properties) []st
 		trackerConnectionPortSetting:       {},
 		trackerConnectionDefaultEnabledKey: {},
 		trackerConnectionKeyEnv:            {},
+		checkpointFolderSetting:            {},
 	}
 	if value, ok := props.Get(trackerConnectionEnv); ok && strings.TrimSpace(value) == "" {
 		env = removeEnvKey(env, trackerConnectionEnv)
@@ -607,6 +608,12 @@ func killLockingProcess() error {
 // the Fyne UI thread stays responsive.  See launchSupervisedForeground for
 // the synchronous headless equivalent used under systemd.
 func launchOwlcms(version string, launchButton, stopBtn *widget.Button) error {
+	return launchOwlcmsLoading(version, "", launchButton, stopBtn)
+}
+
+// launchOwlcmsLoading launches OWLCMS; a non-empty loadJSON is passed as OWLCMS_LOADJSON for this launch only, so
+// OWLCMS replaces its database with that export (or the newest one in that folder). It is never saved.
+func launchOwlcmsLoading(version, loadJSON string, launchButton, stopBtn *widget.Button) error {
 	currentVersion = version
 
 	var err error
@@ -621,6 +628,10 @@ func launchOwlcms(version string, launchButton, stopBtn *widget.Button) error {
 		goBackToMainScreen()
 		releaseJavaLock()
 		return err
+	}
+	if loadJSON != "" {
+		log.Printf("   %s=%s (launch from checkpoint)", loadJSONEnv, loadJSON)
+		params.Env = setEnvValue(params.Env, loadJSONEnv, loadJSON)
 	}
 	if params.TrackerKeyWarning != "" {
 		dialog.ShowInformation("Tracker Shared Key", params.TrackerKeyWarning, mainWindow)

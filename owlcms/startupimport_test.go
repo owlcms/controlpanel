@@ -1,9 +1,12 @@
 package owlcms
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func exitWith(t *testing.T, code string) error {
@@ -54,5 +57,45 @@ func TestOrdinaryLaunchKeepsTheUsualRules(t *testing.T) {
 	}
 	if restart, _ := restartDecision(env, exitWith(t, "75")); !restart {
 		t.Fatal("exit 75 restarts an ordinary launch too")
+	}
+}
+
+func TestCheckpointExportIsTheNewestJsonDirectlyInTheFolder(t *testing.T) {
+	folder := t.TempDir()
+	if _, err := checkpointExport(folder); err == nil {
+		t.Fatal("an empty folder must not be offered")
+	}
+	if _, err := checkpointExport(""); err == nil {
+		t.Fatal("no folder must not be offered")
+	}
+	if _, err := checkpointExport(filepath.Join(folder, "missing")); err == nil {
+		t.Fatal("a missing folder must not be offered")
+	}
+
+	write := func(name string, at time.Time) {
+		path := filepath.Join(folder, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	write("zips/2026-11-01T13-56-23.385Z.zip", now)
+	write("logs/owlcms.log", now)
+	if _, err := checkpointExport(folder); err == nil {
+		t.Fatal("zips and logs alone must not be offered")
+	}
+	write("database_v2_2026-11-01_08h43.json", now.Add(-time.Hour))
+	write("database_v2_2026-11-01_08h56.json", now)
+	write("logs/nested.json", now.Add(time.Hour))
+
+	export, err := checkpointExport(folder)
+	if err != nil || export != "database_v2_2026-11-01_08h56.json" {
+		t.Fatalf("expected the newest top-level export, got %q, %v", export, err)
 	}
 }

@@ -53,3 +53,24 @@ func selectSaveZip(w fyne.Window, defaultFilename string, cb func(path string, e
 	fileDialog.SetFileName(defaultFilename)
 	fileDialog.Show()
 }
+
+// selectFolder shows a Fyne folder chooser on Linux, starting in startDir when it is set.
+func selectFolder(w fyne.Window, _ string, startDir string, cb func(path string, err error)) {
+	fd := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
+		if err != nil {
+			cb("", err)
+			return
+		}
+		if uri == nil {
+			cb("", nil)
+			return
+		}
+		cb(uri.Path(), nil)
+	}, w)
+	if startDir != "" {
+		if location, err := storage.ListerForURI(storage.NewFileURI(startDir)); err == nil {
+			fd.SetLocation(location)
+		}
+	}
+	fd.Show()
+}

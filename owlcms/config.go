@@ -33,6 +33,8 @@ const (
 	trackerConnectionURLSetting        = "CONTROLPANEL_TRACKER_URL"
 	trackerConnectionPortSetting       = "CONTROLPANEL_TRACKER_PORT"
 	trackerConnectionDefaultEnabledKey = "CONTROLPANEL_TRACKER_CONNECTION_ENABLED_BY_DEFAULT"
+	// folder kept up to date by the tracker's Checkpoints plugin; OWLCMS can be launched from it
+	checkpointFolderSetting = "CONTROLPANEL_CHECKPOINT_FOLDER"
 )
 
 const (
@@ -117,6 +119,20 @@ func SetRunAsDaemon(enabled bool) error {
 	}
 
 	return shared.SetRunAsDaemonEnabled(enabled)
+}
+
+// GetCheckpointFolder returns the checkpoints folder saved in the shared env.properties, or "".
+func GetCheckpointFolder() string {
+	if environment == nil {
+		return ""
+	}
+	value, _ := environment.Get(checkpointFolderSetting)
+	return strings.TrimSpace(value)
+}
+
+// SetCheckpointFolder saves the checkpoints folder in the shared env.properties, so every installed version sees it.
+func SetCheckpointFolder(folder string) error {
+	return SaveProperty(checkpointFolderSetting, strings.TrimSpace(folder))
 }
 
 // GetPortForRelease returns the effective OWLCMS_PORT for a selected release,

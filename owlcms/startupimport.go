@@ -2,8 +2,11 @@ package owlcms
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"controlpanel/shared"
 )
@@ -37,6 +40,36 @@ func withoutStartupImport(env []string) []string {
 		}
 	}
 	return kept
+}
+
+// checkpointExport returns the export OWLCMS would load from a checkpoints folder: the most recent .json directly in
+// it (OWLCMS_LOADJSON picks the newest one the same way), or an error saying why the folder cannot be used.
+func checkpointExport(folder string) (string, error) {
+	if strings.TrimSpace(folder) == "" {
+		return "", errors.New("no checkpoints folder selected")
+	}
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return "", fmt.Errorf("checkpoints folder %s cannot be read: %w", folder, err)
+	}
+	newest := ""
+	var newestTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if newest == "" || info.ModTime().After(newestTime) {
+			newest, newestTime = entry.Name(), info.ModTime()
+		}
+	}
+	if newest == "" {
+		return "", fmt.Errorf("checkpoints folder %s holds no export (.json)", folder)
+	}
+	return newest, nil
 }
 
 // restartDecision decides whether OWLCMS is restarted after it exits, and with which environment.

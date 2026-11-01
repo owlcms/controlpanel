@@ -188,8 +188,8 @@ func createVersionList(w fyne.Window, stopBtn *widget.Button) *widget.List {
 			buttonContainer := grid.Objects[1].(*fyne.Container)
 			buttonContainer.RemoveAll()
 
-			createLaunchButton(w, version, stopBtn, buttonContainer)
-			createVersionOptionsButton(w, version, buttonContainer)
+			launchButton := createLaunchButton(w, version, stopBtn, buttonContainer)
+			createVersionOptionsButton(w, version, launchButton, stopBtn, buttonContainer)
 			createFilesButton(version, w, buttonContainer)
 			if len(allReleases) > 0 {
 				createUpdateButton(version, w, buttonContainer)
@@ -231,7 +231,7 @@ func createVersionList(w fyne.Window, stopBtn *widget.Button) *widget.List {
 	return versionList
 }
 
-func createVersionOptionsButton(w fyne.Window, version string, buttonContainer *fyne.Container) {
+func createVersionOptionsButton(w fyne.Window, version string, launchButton, stopBtn *widget.Button, buttonContainer *fyne.Container) {
 	menuItems := []*fyne.MenuItem{
 		fyne.NewMenuItem("Port Number", func() {
 			showPortNumberDialogForVersion(w, version)
@@ -239,6 +239,14 @@ func createVersionOptionsButton(w fyne.Window, version string, buttonContainer *
 		fyne.NewMenuItem("Tracker Connection", func() {
 			showTrackerConnectionDialogForVersion(w, version)
 		}),
+	}
+	// offered only while the checkpoints folder holds an export
+	if folder := GetCheckpointFolder(); folder != "" {
+		if export, err := checkpointExport(folder); err == nil {
+			menuItems = append(menuItems, fyne.NewMenuItemSeparator(), fyne.NewMenuItem("Launch from Checkpoint", func() {
+				confirmLaunchFromCheckpoint(w, version, folder, export, launchButton, stopBtn)
+			}))
+		}
 	}
 
 	buttonContainer.Add(container.NewPadded(shared.CreateMenuButton("Options", menuItems)))
@@ -395,7 +403,7 @@ func createFilesButton(version string, w fyne.Window, buttonContainer *fyne.Cont
 	return filesButton
 }
 
-func createLaunchButton(w fyne.Window, version string, stopBtn *widget.Button, buttonContainer *fyne.Container) {
+func createLaunchButton(w fyne.Window, version string, stopBtn *widget.Button, buttonContainer *fyne.Container) *widget.Button {
 	launchButton := widget.NewButton("Launch", nil)
 	launchButton.Resize(fyne.NewSize(80, 25))
 	launchButton.Importance = widget.HighImportance
@@ -423,6 +431,32 @@ func createLaunchButton(w fyne.Window, version string, stopBtn *widget.Button, b
 		doLaunch()
 	}
 	buttonContainer.Add(container.NewPadded(launchButton))
+	return launchButton
+}
+
+// confirmLaunchFromCheckpoint launches OWLCMS with its database replaced by the newest export in the checkpoints
+// folder. Meant for when the machine that was running OWLCMS is lost.
+func confirmLaunchFromCheckpoint(w fyne.Window, version, folder, export string, launchButton, stopBtn *widget.Button) {
+	if currentProcess != nil {
+		dialog.ShowError(fmt.Errorf("OWLCMS is already running"), w)
+		return
+	}
+	message := fmt.Sprintf("Launch OWLCMS %s from the checkpoints folder\n%s ?\n\n"+
+		"The database will be replaced by %s.\n"+
+		"Use this only when the machine that was running OWLCMS is no longer available.", version, folder, export)
+	dialog.ShowConfirm("Launch from Checkpoint", message, func(confirmed bool) {
+		if !confirmed {
+			return
+		}
+		log.Printf("Launching version %s from checkpoints folder %s\n", version, folder)
+		ver := GetTemurinVersionForRelease(version)
+		if err := shared.CheckAndInstallJava(ver, statusLabel, w, checkJava); err != nil {
+			return
+		}
+		if err := launchOwlcmsLoading(version, folder, launchButton, stopBtn); err != nil {
+			dialog.ShowError(err, w)
+		}
+	}, w)
 }
 
 func adjustUpdateButton(mostRecent string, version string, updateButton *widget.Button, buttonContainer *fyne.Container, w fyne.Window) bool {

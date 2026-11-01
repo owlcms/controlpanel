@@ -42,3 +42,20 @@ func selectSaveZip(_ fyne.Window, defaultFilename string, cb func(path string, e
 		cb(path, nil)
 	}()
 }
+
+// selectFolder shows a native sqweek folder chooser on Windows and macOS, starting in startDir when it is set.
+func selectFolder(_ fyne.Window, title, startDir string, cb func(path string, err error)) {
+	// Run in a goroutine because sqweek blocks the thread.
+	go func() {
+		builder := dialog.Directory().Title(title)
+		if startDir != "" {
+			builder = builder.SetStartDir(startDir)
+		}
+		path, err := builder.Browse()
+		if err == dialog.ErrCancelled {
+			cb("", nil)
+			return
+		}
+		cb(path, err)
+	}()
+}

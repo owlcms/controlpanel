@@ -321,7 +321,39 @@ func createOptionsMenu(w fyne.Window) *widget.Button {
 	})
 	trackerToggleItem.Label = "Default Tracker Connection"
 
-	return shared.CreateMenuButton("Options", []*fyne.MenuItem{setPortItem, trackerToggleItem})
+	checkpointFolderItem := fyne.NewMenuItem("Select Checkpoints Folder…", func() {
+		selectCheckpointFolder(w)
+	})
+
+	return shared.CreateMenuButton("Options", []*fyne.MenuItem{setPortItem, trackerToggleItem, checkpointFolderItem})
+}
+
+// selectCheckpointFolder saves the folder filled by the tracker's Checkpoints plugin in the OWLCMS settings. When it
+// holds an export, each installed version's Options menu offers Launch from Checkpoint.
+func selectCheckpointFolder(w fyne.Window) {
+	selectFolder(w, "Select Checkpoints Folder", GetCheckpointFolder(), func(path string, err error) {
+		fyne.Do(func() {
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("folder selection failed: %w", err), w)
+				return
+			}
+			if path == "" {
+				return
+			}
+			if err := SetCheckpointFolder(path); err != nil {
+				dialog.ShowError(err, w)
+				return
+			}
+			message := fmt.Sprintf("Checkpoints folder: %s\n\n", path)
+			if export, err := checkpointExport(path); err != nil {
+				message += fmt.Sprintf("%v.\nLaunch from Checkpoint will be offered once a checkpoint is stored there.", err)
+			} else {
+				message += fmt.Sprintf("Launch from Checkpoint (in each version's Options menu) will load %s.", export)
+			}
+			dialog.ShowInformation("Checkpoints Folder", message, w)
+			recomputeVersionList(w)
+		})
+	})
 }
 
 func installVersionFromZip(w fyne.Window) {
