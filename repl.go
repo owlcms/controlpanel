@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -314,8 +315,12 @@ func executeREPLModule(module string, args []string, out io.Writer) error {
 		return err
 	}
 	if moduleCommandRequiresExclusiveControlPanel(cmd) {
-		if running, ok := runningControlPanelMetadata(); ok {
-			return fmt.Errorf("another OWLCMS Control Panel is already running (%s); use that UI or close it before running module commands", describeControlPanelRuntime(running))
+		conflicts, err := conflictingControlPanels()
+		if err != nil {
+			log.Printf("Cannot list running Control Panels: %v", err)
+		}
+		if len(conflicts) > 0 {
+			return fmt.Errorf("another OWLCMS Control Panel is already running on this instance (%s); use that UI or close it before running module commands", describeRunningControlPanel(conflicts[0]))
 		}
 	}
 

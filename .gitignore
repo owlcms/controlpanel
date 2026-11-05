@@ -41,4 +41,5 @@ scripts/.DS_Store
 
 # portprobe diagnostic CLI builds (go build -o portprobe ./cmd/portprobe)
 /portprobe
+/portprobe.exe
 /portprobe-*

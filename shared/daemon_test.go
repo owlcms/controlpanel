@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -38,32 +39,21 @@ func TestCheckDaemonRunningDetectsRecordedProcess(t *testing.T) {
 	}
 }
 
-func TestRuntimeMetadataKeepsTheTokenForItsOwnerOnly(t *testing.T) {
+func TestRuntimeMetadataNeverStoresTheToken(t *testing.T) {
 	metadataPath := filepath.Join(t.TempDir(), "runtime.json")
-	if _, err := WriteRuntimeMetadataWithToken(metadataPath, os.Getpid(), "test", "8080", false, "Ab3-xY9_kLmN"); err != nil {
+	if _, err := WriteRuntimeMetadata(metadataPath, os.Getpid(), "test", "8080", false); err != nil {
 		t.Fatalf("write runtime metadata: %v", err)
 	}
-
-	got, running := CheckDaemonRunning(metadataPath)
-	if !running || got == nil || got.Token != "Ab3-xY9_kLmN" {
-		t.Fatalf("CheckDaemonRunning returned %+v (running=%v), want the recorded token", got, running)
+	content, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if GetGoos() != "windows" {
-		info, err := os.Stat(metadataPath)
-		if err != nil {
-			t.Fatalf("stat runtime metadata: %v", err)
-		}
-		if perm := info.Mode().Perm(); perm != 0600 {
-			t.Fatalf("runtime metadata with a token has mode %o, want 600", perm)
-		}
+	if strings.Contains(strings.ToLower(string(content)), "token") {
+		t.Fatalf("runtime metadata must not contain a token field: %s", content)
 	}
-
-	if _, err := WriteRuntimeMetadata(metadataPath, os.Getpid(), "test", "8080", false); err != nil {
-		t.Fatalf("rewrite runtime metadata: %v", err)
-	}
-	got, _ = CheckDaemonRunning(metadataPath)
+	got, _ := CheckDaemonRunning(metadataPath)
 	if got == nil || got.Token != "" {
-		t.Fatalf("metadata written without a token kept %q", got.Token)
+		t.Fatalf("metadata read back a token: %+v", got)
 	}
 }
 

@@ -211,7 +211,6 @@ func main() {
 	}) {
 		return
 	}
-	defer clearCurrentControlPanelRuntime()
 	a.Run()
 }
 
@@ -728,7 +727,6 @@ func setupSignalHandling() {
 		go func() {
 			time.Sleep(5 * time.Second)
 			log.Println("Cleanup timeout reached, forcing exit...")
-			clearCurrentControlPanelRuntime()
 			os.Exit(1)
 		}()
 
@@ -750,7 +748,6 @@ func setupSignalHandling() {
 		}
 
 		log.Println("Exiting Control Panel...")
-		clearCurrentControlPanelRuntime()
 		os.Exit(0)
 	}()
 }
@@ -766,6 +763,27 @@ type runningModuleProcess struct {
 }
 
 func resolveRunningModuleProcess(label, metadataPath, pidFilePath, port, fallbackVersion string) (*runningModuleProcess, error) {
+	if label == "owlcms" {
+		// OWLCMS is identified by the process listening on its port, never by a recorded PID.
+		running, err := owlcms.FindRunningOwlcms()
+		if err != nil || running == nil {
+			return nil, err
+		}
+		version := running.Version
+		if version == "" {
+			version = fallbackVersion
+		}
+		return &runningModuleProcess{
+			Label:        label,
+			Version:      version,
+			PID:          int(running.Assessment.Listener.PID),
+			Port:         running.Port,
+			Source:       "port listener",
+			MetadataPath: metadataPath,
+			PIDFilePath:  pidFilePath,
+		}, nil
+	}
+
 	if meta, running := shared.CheckDaemonRunning(metadataPath); running {
 		return &runningModuleProcess{
 			Label:        label,
@@ -855,7 +873,7 @@ func stopOneModule(label, metadataPath, pidFilePath, port, fallbackVersion strin
 
 	var stopErr error
 	if label == "owlcms" {
-		stopErr = owlcms.StopProcessByPort(running.Port)
+		_, stopErr = owlcms.StopRunningOwlcms()
 	} else {
 		stopErr = shared.StopPIDFileOrPortProcess(pidFilePath, running.Port)
 	}

@@ -22,7 +22,6 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/Masterminds/semver/v3"
-	"github.com/gofrs/flock"
 	"github.com/magiconair/properties"
 )
 
@@ -51,7 +50,6 @@ var (
 	lockFilePath    = filepath.Join(controlPanelDir, "java.lock")
 	pidFilePath     = filepath.Join(controlPanelDir, "java.pid")
 	javaPID         int
-	lock            *flock.Flock
 	currentProcess  *exec.Cmd
 	currentVersion  string
 	activeRuntime   *shared.RuntimeMetadata
@@ -79,8 +77,9 @@ func PIDFilePath() string {
 
 func clearRuntimeState() {
 	activeRuntime = nil
+	// older control panels wrote this file; it is no longer used
 	if err := shared.ClearRuntimeMetadata(runtimeMetadataPath()); err != nil {
-		log.Printf("Failed to clear OWLCMS runtime metadata: %v", err)
+		log.Printf("Failed to remove legacy OWLCMS runtime metadata: %v", err)
 	}
 }
 
@@ -345,23 +344,18 @@ func buildOwlcmsCommand(params *owlcmsLaunchParams, useDaemonWrapper bool) *exec
 	return exec.Command(params.JavaPath, "-jar", filepath.Base(params.JarPath))
 }
 
-// recordOwlcmsStart writes the PID file and runtime metadata after a successful cmd.Start().
-// token is the control panel token given to this launch, kept for stop and the copy icon.
+// recordOwlcmsStart keeps the launch in memory after a successful cmd.Start(). Nothing is written to disk: a
+// running OWLCMS is later found from the process inventory, and the token is never persisted.
 func recordOwlcmsStart(pid int, version, port string, daemon bool, token string) *shared.RuntimeMetadata {
-	if err := os.WriteFile(pidFilePath, fmt.Appendf(nil, "%d\n", pid), 0644); err != nil {
-		log.Printf("Failed to write PID to PID file: %v\n", err)
-	} else {
-		log.Printf("Wrote PID %d to PID file %s\n", pid, pidFilePath)
-	}
-
 	SaveLastRunVersion(version)
-
-	metadata, err := shared.WriteRuntimeMetadataWithToken(runtimeMetadataPath(), pid, version, port, daemon, token)
-	if err != nil {
-		log.Printf("Failed to write OWLCMS runtime metadata: %v", err)
-		return nil
+	return &shared.RuntimeMetadata{
+		PID:       pid,
+		Version:   version,
+		Port:      strings.TrimSpace(port),
+		Daemon:    daemon,
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+		Token:     token,
 	}
-	return metadata
 }
 
 // SaveLastRunVersion persists the version selected for the last launch.
@@ -559,47 +553,21 @@ var (
 	startupReadyReported atomic.Bool
 )
 
-func acquireJavaLock() (*flock.Flock, error) {
-	pid, source, err := shared.ResolvePIDFromFileOrPort(pidFilePath, GetPort())
-	if err != nil {
-		return nil, err
-	}
-	if pid == 0 {
-		return nil, nil
-	}
-	if source == "pid file" {
-		log.Printf("Another instance of OWLCMS is already running with PID %d", pid)
-		return nil, fmt.Errorf("another instance of OWLCMS is already running with PID %d", pid)
-	}
-
-	log.Printf("No running PID from PID file; clearing stale lock before checking PID %d resolved from %s", pid, source)
-	os.Remove(pidFilePath)
-	os.Remove(lockFilePath)
-
-	return nil, nil
-}
-
 func releaseJavaLock() {
-	log.Println("Released Java lock")
-	if lock != nil {
-		lock.Unlock()
-		lock = nil
-	}
-
+	// Older control panels wrote these files; occupancy is now decided from the port listener.
 	os.Remove(lockFilePath)
 	os.Remove(pidFilePath)
 }
 
-func killLockingProcess() error {
+func killLockingProcess(w fyne.Window, onDone func(freed bool)) {
 	port := GetPort()
-	if err := StopProcessByPort(port); err != nil {
-		releaseJavaLock()
-		return err
-	}
-
-	releaseJavaLock()
-	log.Printf("Freed port %s\n", port)
-	return nil
+	freeOwlcmsPort(port, w, func(freed bool) {
+		if freed {
+			releaseJavaLock()
+			log.Printf("Freed port %s\n", port)
+		}
+		onDone(freed)
+	})
 }
 
 // launchOwlcms is the interactive (GUI) launcher.  It shares the same
@@ -615,13 +583,6 @@ func launchOwlcms(version string, launchButton, stopBtn *widget.Button) error {
 // OWLCMS replaces its database with that export (or the newest one in that folder). It is never saved.
 func launchOwlcmsLoading(version, loadJSON string, launchButton, stopBtn *widget.Button) error {
 	currentVersion = version
-
-	var err error
-	lock, err = acquireJavaLock()
-	if err != nil {
-		goBackToMainScreen()
-		return err
-	}
 
 	params, err := prepareOwlcmsLaunch(version, nil)
 	if err != nil {
@@ -640,42 +601,15 @@ func launchOwlcmsLoading(version, loadJSON string, launchButton, stopBtn *widget
 	targetPort := params.TargetPort
 	if shared.CheckPort(targetPort) == nil {
 		log.Printf("Port %s is in use; asking before freeing it", targetPort)
-		dialog.ShowConfirm("Port In Use", fmt.Sprintf("Port %s is already in use. Stop the process using it and launch OWLCMS %s?", targetPort, version), func(confirm bool) {
-			if !confirm {
-				log.Printf("User cancelled freeing port %s", targetPort)
+		freeOwlcmsPort(targetPort, mainWindow, func(freed bool) {
+			if !freed {
 				releaseJavaLock()
 				goBackToMainScreen()
 				return
 			}
-
-			progressLabel := widget.NewLabel(fmt.Sprintf("Port %s is busy, stopping the process that is using it...", targetPort))
-			progressDialog := dialog.NewCustom("Freeing Port", "", progressLabel, mainWindow)
-			progressDialog.Show()
-
-			go func() {
-				err := shared.EnsurePortFree(targetPort)
-				fyne.Do(func() {
-					progressDialog.Hide()
-
-					if err != nil {
-						log.Printf("Cannot free port %s: %v", targetPort, err)
-						dialog.ShowError(fmt.Errorf("cannot free port %s: %w", targetPort, err), mainWindow)
-						goBackToMainScreen()
-						return
-					}
-					if shared.CheckPort(targetPort) == nil {
-						log.Printf("Port %s is still in use after cleanup", targetPort)
-						dialog.ShowError(fmt.Errorf("port %s is still in use after cleanup", targetPort), mainWindow)
-						goBackToMainScreen()
-						return
-					}
-
-					log.Printf("Port %s successfully freed", targetPort)
-					dialog.ShowInformation("Port Freed", fmt.Sprintf("Port %s has been freed. Launching OWLCMS %s...", targetPort, version), mainWindow)
-					continueOwlcmsLaunch(version, params, launchButton, stopBtn)
-				})
-			}()
-		}, mainWindow)
+			log.Printf("Port %s successfully freed", targetPort)
+			continueOwlcmsLaunch(version, params, launchButton, stopBtn)
+		})
 		return nil
 	}
 

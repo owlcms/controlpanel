@@ -15,6 +15,7 @@ import (
 	"time"
 
 	psnet "github.com/shirou/gopsutil/net"
+	"github.com/shirou/gopsutil/process"
 )
 
 // RuntimeMetadata stores the minimum process identity needed to reconnect
@@ -26,9 +27,9 @@ type RuntimeMetadata struct {
 	Daemon            bool   `json:"daemon"`
 	ProcessStartTicks uint64 `json:"processStartTicks"`
 	StartedAt         string `json:"startedAt"`
-	// Token is the control panel token given to the process at launch, kept so a restarted control panel can
-	// show it and present it on stop. The file is then readable by its owner only.
-	Token string `json:"token,omitempty"`
+	// Token is the control panel token given to the process at launch. It is kept in memory only, for the
+	// copy icon and the stop request of the control panel that launched the process, and is never written to disk.
+	Token string `json:"-"`
 }
 
 const RunAsDaemonEnv = "CONTROLPANEL_RUN_AS_DAEMON"
@@ -71,12 +72,6 @@ func LoadRuntimeMetadata(filePath string) (*RuntimeMetadata, error) {
 
 // WriteRuntimeMetadata writes runtime metadata atomically.
 func WriteRuntimeMetadata(filePath string, pid int, version, port string, daemon bool) (*RuntimeMetadata, error) {
-	return WriteRuntimeMetadataWithToken(filePath, pid, version, port, daemon, "")
-}
-
-// WriteRuntimeMetadataWithToken writes runtime metadata atomically, including the control panel token given to
-// the process; with a token, the file is readable by its owner only.
-func WriteRuntimeMetadataWithToken(filePath string, pid int, version, port string, daemon bool, token string) (*RuntimeMetadata, error) {
 	if err := EnsureDir0755(filepath.Dir(filePath)); err != nil {
 		return nil, fmt.Errorf("creating runtime metadata directory: %w", err)
 	}
@@ -93,7 +88,6 @@ func WriteRuntimeMetadataWithToken(filePath string, pid int, version, port strin
 		Daemon:            daemon,
 		ProcessStartTicks: startTicks,
 		StartedAt:         time.Now().UTC().Format(time.RFC3339),
-		Token:             token,
 	}
 
 	content, err := json.MarshalIndent(metadata, "", "  ")
@@ -101,13 +95,9 @@ func WriteRuntimeMetadataWithToken(filePath string, pid int, version, port strin
 		return nil, fmt.Errorf("marshal runtime metadata: %w", err)
 	}
 
-	mode := os.FileMode(0644)
-	if token != "" {
-		mode = 0600
-	}
 	tempPath := filePath + ".tmp"
 	_ = os.Remove(tempPath)
-	if err := os.WriteFile(tempPath, content, mode); err != nil {
+	if err := os.WriteFile(tempPath, content, 0644); err != nil {
 		return nil, fmt.Errorf("write runtime metadata temp file: %w", err)
 	}
 
@@ -135,20 +125,21 @@ func IsProcessRunning(pid int) bool {
 	}
 
 	if GetGoos() == "windows" {
-		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH")
-		output, err := cmd.CombinedOutput()
+		// Native check: tasklist would flash a console window on every poll.
+		exists, err := process.PidExists(int32(pid))
 		if err != nil {
+			log.Printf("IsProcessRunning(%d): %v", pid, err)
 			return false
 		}
-		return strings.Contains(string(output), strconv.Itoa(pid))
+		return exists
 	}
 
-	process, err := os.FindProcess(pid)
+	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
 
-	err = process.Signal(syscall.Signal(0))
+	err = proc.Signal(syscall.Signal(0))
 	return err == nil
 }
 

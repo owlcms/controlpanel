@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package portowner
 
 import (
 	"errors"
@@ -9,8 +9,7 @@ import (
 )
 
 // errNoSoftStop is never returned on Unix: SIGTERM is a real soft stop that
-// OWLCMS catches and turns into exit 0. It exists so stopProcess can test for
-// it on every platform.
+// OWLCMS catches and turns into exit 0.
 var errNoSoftStop = errors.New("no soft stop available")
 
 // terminate sends SIGTERM (force=false) or SIGKILL (force=true) to one PID.

@@ -1,10 +1,6 @@
 package owlcms
 
 import (
-	"net"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -77,46 +73,6 @@ func TestBuildOwlcmsCommandUsesJarEntrypointForNormalMode(t *testing.T) {
 		if cmd.Args[i] != want[i] {
 			t.Fatalf("unexpected arg %d: got %q want %q (all args: %v)", i, cmd.Args[i], want[i], want)
 		}
-	}
-}
-
-func TestAcquireJavaLockClearsStalePIDWithoutStoppingPortOwner(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen on test port: %v", err)
-	}
-	defer listener.Close()
-
-	previousEnvironment := environment
-	previousPIDFilePath := pidFilePath
-	previousLockFilePath := lockFilePath
-	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
-	environment = properties.NewProperties()
-	environment.Set("OWLCMS_PORT", port)
-	pidFilePath = filepath.Join(t.TempDir(), "java.pid")
-	lockFilePath = filepath.Join(t.TempDir(), "java.lock")
-	t.Cleanup(func() {
-		environment = previousEnvironment
-		pidFilePath = previousPIDFilePath
-		lockFilePath = previousLockFilePath
-	})
-
-	stalePID := os.Getpid() + 100000
-	for shared.IsProcessRunning(stalePID) {
-		stalePID++
-	}
-	if err := os.WriteFile(pidFilePath, []byte(strconv.Itoa(stalePID)), 0644); err != nil {
-		t.Fatalf("write stale PID file: %v", err)
-	}
-
-	if _, err := acquireJavaLock(); err != nil {
-		t.Fatalf("acquire Java lock: %v", err)
-	}
-	if _, err := os.Stat(pidFilePath); !os.IsNotExist(err) {
-		t.Fatalf("expected stale PID file to be removed, stat error: %v", err)
-	}
-	if err := shared.CheckPort(port); err != nil {
-		t.Fatalf("stale PID cleanup stopped the listener on port %s: %v", port, err)
 	}
 }
 

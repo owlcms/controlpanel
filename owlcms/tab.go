@@ -13,6 +13,7 @@ import (
 	"controlpanel/owlcms/installutils"
 	"controlpanel/owlcms/javacheck"
 	"controlpanel/shared"
+	"controlpanel/shared/portowner"
 	"controlpanel/tracker"
 
 	"fyne.io/fyne/v2"
@@ -415,11 +416,11 @@ func createMenuBar(w fyne.Window) *fyne.Container {
 	// Create the Processes menu button with popup
 	processMenuItems := []*fyne.MenuItem{
 		fyne.NewMenuItem("Kill Already Running Process", func() {
-			if err := killLockingProcess(); err != nil {
-				dialog.ShowError(fmt.Errorf("failed to kill already running process: %w", err), w)
-			} else {
-				dialog.ShowInformation("Success", "Successfully killed the already running process", w)
-			}
+			killLockingProcess(w, func(freed bool) {
+				if freed {
+					dialog.ShowInformation("Success", "No OWLCMS process is running and the port is free", w)
+				}
+			})
 		}),
 	}
 	processMenu := shared.CreateMenuButton("Processes", processMenuItems)
@@ -857,8 +858,12 @@ func refreshAvailableVersions(w fyne.Window) {
 
 // initializeOwlcmsTab handles the async initialization of the OWLCMS tab
 func initializeOwlcmsTab(w fyne.Window) {
+	running, err := FindRunningOwlcms()
+	if err != nil {
+		log.Printf("Cannot determine whether OWLCMS is running: %v", err)
+	}
 	fyne.Do(func() {
-		if reconnectOwlcmsRuntime() {
+		if reconnectOwlcmsRuntime(running) {
 			log.Println("OWLCMS tab reattached to existing runtime")
 			return
 		}
@@ -1030,16 +1035,34 @@ func configureTrackerConnectionUI(version string) {
 	trackerConnectionRow.Show()
 }
 
-func reconnectOwlcmsRuntime() bool {
-	metadata, running := shared.CheckDaemonRunning(runtimeMetadataPath())
-	if !running {
+// reconnectOwlcmsRuntime attaches the UI to the OWLCMS listening on its port.
+// An OWLCMS still supervised by another live Control Panel is left to it; the
+// launch then reports the port as in use.
+func reconnectOwlcmsRuntime(running *RunningOwlcms) bool {
+	if running == nil {
 		clearRuntimeState()
 		releaseJavaLock()
 		return false
 	}
+	a := running.Assessment
+	if a.ParentKind == portowner.ParentSupervisor && portowner.Classify(*a.Parent) == portowner.KindControlPanel {
+		log.Printf("OWLCMS PID %d on port %s belongs to Control Panel PID %d; not reattaching",
+			a.Listener.PID, running.Port, a.Parent.PID)
+		return false
+	}
 
-	activeRuntime = metadata
-	restoreOwlcmsRunningUI(metadata.Version, metadata.Port, metadata.PID)
+	version := running.Version
+	if version == "" {
+		version = GetLastRunVersion()
+	}
+	// A MainWrapper parent means a detached daemon launch; such an OWLCMS must
+	// outlive this control panel. Anything else closes with it, as before.
+	daemon := a.ParentKind == portowner.ParentSupervisor && portowner.Classify(*a.Parent) == portowner.KindMainWrapper
+	log.Printf("Reattaching to OWLCMS PID %d on port %s (version %q, daemon %v)", a.Listener.PID, running.Port, version, daemon)
+	activeRuntime = &shared.RuntimeMetadata{PID: int(a.Listener.PID), Version: version, Port: running.Port, Daemon: daemon,
+		// read from the process environment so the copy icon and the clean stop keep working
+		Token: strings.TrimSpace(portowner.EnvValue(a.Listener.PID, controlPanelTokenEnv))}
+	restoreOwlcmsRunningUI(version, running.Port, int(a.Listener.PID))
 	return true
 }
 
@@ -1258,7 +1281,7 @@ func HandleSignalCleanup() {
 		killedByUs = true
 
 		// Use forceful termination since we need to exit quickly
-		_ = shared.ForcefullyKillPID(pid)
+		_ = currentProcess.Process.Kill()
 		clearRuntimeState()
 		releaseJavaLock()
 		return
@@ -1266,9 +1289,25 @@ func HandleSignalCleanup() {
 
 	if activeRuntime != nil {
 		killedByUs = true
-		_ = shared.ForcefullyKillPID(activeRuntime.PID)
+		killRunningOwlcmsNow()
 		clearRuntimeState()
 		releaseJavaLock()
+	}
+}
+
+// killRunningOwlcmsNow terminates the OWLCMS listening on its port without
+// asking it to stop first.
+func killRunningOwlcmsNow() {
+	running, err := FindRunningOwlcms()
+	if err != nil || running == nil {
+		log.Printf("No OWLCMS to stop on exit: %v", err)
+		return
+	}
+	listener := running.Assessment.Listener
+	portNum, _ := strconv.Atoi(running.Port)
+	report := func(line string) { log.Printf("Stopping OWLCMS on exit: %s", line) }
+	if err := portowner.Stop(listener, func() error { return portowner.ValidateListener(listener, portNum) }, report); err != nil {
+		log.Printf("Could not stop OWLCMS PID %d on exit: %v", listener.PID, err)
 	}
 }
 

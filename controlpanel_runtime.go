@@ -1,16 +1,15 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"controlpanel/shared"
+	"controlpanel/shared/portowner"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -18,216 +17,158 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-type controlPanelRuntimeMetadata struct {
-	PID               int    `json:"pid"`
-	ProcessStartTicks uint64 `json:"processStartTicks"`
-	Instance          string `json:"instance"`
-	Executable        string `json:"executable"`
-	WorkingDir        string `json:"workingDir"`
-	StartedAt         string `json:"startedAt"`
+// runningControlPanel is another Control Panel process found on this machine.
+type runningControlPanel struct {
+	Identity portowner.Identity
+	// InstanceDir is the control panel directory the process serves, or empty
+	// when it could not be determined.
+	InstanceDir string
 }
 
-func controlPanelPIDPath() string {
-	return filepath.Join(shared.GetControlPanelInstallDir(), "controlpanel.pid")
-}
+const controlPanelInstallDirEnv = "CONTROLPANEL_INSTALLDIR"
 
-func controlPanelRuntimeMetadataPath() string {
-	return filepath.Join(shared.GetControlPanelInstallDir(), "controlpanel-run.json")
-}
-
-func currentControlPanelInstanceName() string {
-	instance := strings.TrimSpace(os.Getenv("CONTROLPANEL_INSTANCE"))
-	if instance == "" {
-		return mainInstanceName
-	}
-	return instance
-}
-
-func writeFileAtomically(path string, content []byte, perm os.FileMode) error {
-	if err := shared.EnsureDir0755(filepath.Dir(path)); err != nil {
-		return err
-	}
-
-	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, content, perm); err != nil {
-		return err
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		_ = os.Remove(tempPath)
-		return err
-	}
-	return nil
-}
-
-func writeCurrentControlPanelRuntime() error {
-	pid := os.Getpid()
-	startTicks, err := shared.ReadProcessStartTicks(pid)
-	if err != nil {
-		return fmt.Errorf("read process start ticks for control panel PID %d: %w", pid, err)
-	}
-
-	executable, err := os.Executable()
-	if err != nil {
-		log.Printf("Failed to resolve control panel executable: %v", err)
-	}
-	workingDir, err := os.Getwd()
-	if err != nil {
-		log.Printf("Failed to resolve control panel working directory: %v", err)
-	}
-
-	metadata := controlPanelRuntimeMetadata{
-		PID:               pid,
-		ProcessStartTicks: startTicks,
-		Instance:          currentControlPanelInstanceName(),
-		Executable:        executable,
-		WorkingDir:        workingDir,
-		StartedAt:         time.Now().UTC().Format(time.RFC3339),
-	}
-
-	content, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal control panel runtime metadata: %w", err)
-	}
-	if err := writeFileAtomically(controlPanelRuntimeMetadataPath(), content, 0644); err != nil {
-		return fmt.Errorf("write control panel runtime metadata: %w", err)
-	}
-	if err := writeFileAtomically(controlPanelPIDPath(), fmt.Appendf(nil, "%d\n", pid), 0644); err != nil {
-		return fmt.Errorf("write control panel PID file: %w", err)
-	}
-
-	log.Printf("Wrote control panel runtime metadata for PID %d", pid)
-	return nil
-}
-
-func readControlPanelRuntimeMetadata() (*controlPanelRuntimeMetadata, error) {
-	content, err := os.ReadFile(controlPanelRuntimeMetadataPath())
+// findRunningControlPanels lists Control Panel processes other than this one
+// and its ancestors, identified from the OS process table rather than from
+// recorded startup files.
+func findRunningControlPanels() ([]runningControlPanel, error) {
+	processes, err := portowner.ListProcesses()
 	if err != nil {
 		return nil, err
 	}
-
-	var metadata controlPanelRuntimeMetadata
-	if err := json.Unmarshal(content, &metadata); err != nil {
-		return nil, fmt.Errorf("unmarshal control panel runtime metadata: %w", err)
-	}
-	return &metadata, nil
-}
-
-func readControlPanelPID() (int, error) {
-	content, err := os.ReadFile(controlPanelPIDPath())
+	ancestors, err := portowner.OwnAncestors()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(content)))
-	if err != nil || pid <= 0 {
-		return 0, fmt.Errorf("invalid control panel PID file %s", controlPanelPIDPath())
-	}
-	return pid, nil
-}
-
-func clearControlPanelRuntimeFiles() {
-	if err := os.Remove(controlPanelPIDPath()); err != nil && !os.IsNotExist(err) {
-		log.Printf("Failed to remove control panel PID file: %v", err)
-	}
-	if err := os.Remove(controlPanelRuntimeMetadataPath()); err != nil && !os.IsNotExist(err) {
-		log.Printf("Failed to remove control panel runtime metadata: %v", err)
-	}
-}
-
-func clearCurrentControlPanelRuntime() {
-	currentPID := os.Getpid()
-	owned := false
-
-	if metadata, err := readControlPanelRuntimeMetadata(); err == nil && metadata.PID == currentPID {
-		owned = true
-	}
-	if pid, err := readControlPanelPID(); err == nil && pid == currentPID {
-		owned = true
-	}
-
-	if !owned {
-		return
-	}
-
-	clearControlPanelRuntimeFiles()
-	log.Printf("Cleared control panel runtime metadata for PID %d", currentPID)
-}
-
-func runningControlPanelMetadata() (*controlPanelRuntimeMetadata, bool) {
-	if metadata, err := readControlPanelRuntimeMetadata(); err == nil {
-		if metadata.PID > 0 && metadata.PID != os.Getpid() && shared.PIDMatchesStartTicks(metadata.PID, metadata.ProcessStartTicks) {
-			return metadata, true
+	var result []runningControlPanel
+	for _, id := range processes {
+		if ancestors[id.PID] || portowner.Classify(id) != portowner.KindControlPanel {
+			continue
 		}
-		log.Printf("Control panel runtime metadata is stale for PID %d", metadata.PID)
-	} else if !os.IsNotExist(err) {
-		log.Printf("Failed to read control panel runtime metadata: %v", err)
+		result = append(result, runningControlPanel{
+			Identity:    id,
+			InstanceDir: controlPanelInstanceDir(id.Args, portowner.Environ(id.PID)),
+		})
 	}
-
-	pid, err := readControlPanelPID()
-	if err == nil && pid > 0 && pid != os.Getpid() && shared.IsProcessRunning(pid) {
-		startTicks, _ := shared.ReadProcessStartTicks(pid)
-		return &controlPanelRuntimeMetadata{
-			PID:               pid,
-			ProcessStartTicks: startTicks,
-			Instance:          currentControlPanelInstanceName(),
-		}, true
-	} else if err != nil && !os.IsNotExist(err) {
-		log.Printf("Failed to read control panel PID file: %v", err)
-	}
-
-	clearControlPanelRuntimeFiles()
-	return nil, false
+	return result, nil
 }
 
-func stopRunningControlPanel(metadata *controlPanelRuntimeMetadata) error {
-	if metadata == nil || metadata.PID <= 0 {
-		return fmt.Errorf("invalid running control panel metadata")
+// controlPanelInstanceDir resolves the control panel directory of a Control
+// Panel launched with args, the same way applyCLIInstanceOptions does: an
+// instance flag wins, then CONTROLPANEL_INSTALLDIR in its environment, then
+// the default directory. Returns empty when the command line is unavailable.
+func controlPanelInstanceDir(args, environ []string) string {
+	if len(args) == 0 {
+		return ""
 	}
-	if metadata.PID == os.Getpid() {
-		return fmt.Errorf("refusing to stop current control panel PID %d", metadata.PID)
+	opts := parseCLIOptions(args[1:])
+	instanceArg := strings.TrimSpace(opts.instanceArg)
+	if instanceArg == "" && opts.init {
+		instanceArg = mainInstanceName
 	}
-
-	if err := shared.GracefullyStopPID(metadata.PID); err != nil {
-		return err
-	}
-
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if !shared.IsProcessRunning(metadata.PID) {
-			clearControlPanelRuntimeFiles()
-			return nil
+	if instanceArg != "" {
+		paths, err := resolveInstancePaths(instanceArg)
+		if err != nil {
+			return ""
 		}
-		time.Sleep(250 * time.Millisecond)
+		return paths.ControlPanelDir
 	}
-
-	return fmt.Errorf("control panel PID %d is still running", metadata.PID)
+	for _, entry := range environ {
+		if value, ok := strings.CutPrefix(entry, controlPanelInstallDirEnv+"="); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return shared.DefaultControlPanelInstallDir()
 }
 
-func describeControlPanelRuntime(metadata *controlPanelRuntimeMetadata) string {
-	parts := []string{fmt.Sprintf("PID %d", metadata.PID)}
-	if strings.TrimSpace(metadata.Instance) != "" {
-		parts = append(parts, "instance "+metadata.Instance)
+func sameInstanceDir(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if shared.GetGoos() == "windows" || shared.GetGoos() == "darwin" {
+		return strings.EqualFold(a, b)
 	}
-	if strings.TrimSpace(metadata.StartedAt) != "" {
-		parts = append(parts, "started "+metadata.StartedAt)
+	return a == b
+}
+
+// conflictingControlPanels returns the running Control Panels serving the same
+// instance directory as this process. One whose instance could not be
+// determined is included, since it may be a conflict.
+func conflictingControlPanels() ([]runningControlPanel, error) {
+	all, err := findRunningControlPanels()
+	if err != nil {
+		return nil, err
 	}
+	mine := shared.GetControlPanelInstallDir()
+	var result []runningControlPanel
+	for _, cp := range all {
+		if cp.InstanceDir == "" || sameInstanceDir(cp.InstanceDir, mine) {
+			result = append(result, cp)
+		} else {
+			log.Printf("Control Panel PID %d serves another instance (%s); no conflict", cp.Identity.PID, cp.InstanceDir)
+		}
+	}
+	return result, nil
+}
+
+func describeRunningControlPanel(cp runningControlPanel) string {
+	id := cp.Identity
+	parts := []string{fmt.Sprintf("PID %d", id.PID), id.Executable}
+	if cp.InstanceDir == "" {
+		parts = append(parts, "instance unknown")
+	}
+	parts = append(parts, "started "+time.UnixMilli(id.Created).Local().Format("2006-01-02 15:04:05"))
 	return strings.Join(parts, ", ")
 }
 
-func startControlPanelRuntimeGate(a fyne.App, w fyne.Window, initialWindowSize fyne.Size, start func()) bool {
-	running, ok := runningControlPanelMetadata()
-	if !ok {
-		if err := writeCurrentControlPanelRuntime(); err != nil {
-			log.Printf("Failed to write control panel runtime metadata: %v", err)
-			fmt.Fprintf(os.Stderr, "control panel runtime: %v\n", err)
-			return false
+// stopRunningControlPanel stops cp, verifying before each signal that the PID
+// still belongs to the same process.
+func stopRunningControlPanel(cp runningControlPanel) error {
+	id := cp.Identity
+	validate := func() error {
+		alive, err := portowner.SameProcess(id)
+		if err != nil {
+			return err
 		}
+		if !alive {
+			return fmt.Errorf("Control Panel PID %d has already exited", id.PID)
+		}
+		return nil
+	}
+	report := func(line string) { log.Printf("Stopping Control Panel PID %d: %s", id.PID, line) }
+	err := portowner.Stop(id, validate, report)
+	if err != nil && strings.Contains(err.Error(), "already exited") {
+		return nil
+	}
+	return err
+}
+
+// removeLegacyControlPanelRuntimeFiles deletes the startup files older
+// control panels used to detect each other.
+func removeLegacyControlPanelRuntimeFiles() {
+	dir := shared.GetControlPanelInstallDir()
+	for _, name := range []string{"controlpanel-run.json", "controlpanel.pid"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+			log.Printf("Failed to remove legacy %s: %v", name, err)
+		}
+	}
+}
+
+func startControlPanelRuntimeGate(a fyne.App, w fyne.Window, initialWindowSize fyne.Size, start func()) bool {
+	removeLegacyControlPanelRuntimeFiles()
+	conflicts, err := conflictingControlPanels()
+	if err != nil {
+		log.Printf("Cannot list running Control Panels: %v", err)
+	}
+	if len(conflicts) == 0 {
 		start()
 		return true
 	}
 
+	var described []string
+	for _, cp := range conflicts {
+		described = append(described, describeRunningControlPanel(cp))
+	}
 	message := fmt.Sprintf(
-		"Another OWLCMS Control Panel is already running (%s).\n\nStop the running Control Panel and continue?",
-		describeControlPanelRuntime(running),
+		"Another OWLCMS Control Panel is already running on this instance:\n%s\n\nStop it and continue?",
+		strings.Join(described, "\n"),
 	)
 	w.Resize(initialWindowSize)
 	w.SetContent(container.NewCenter(widget.NewLabel("Another OWLCMS Control Panel is already running.")))
@@ -243,23 +184,16 @@ func startControlPanelRuntimeGate(a fyne.App, w fyne.Window, initialWindowSize f
 			}
 
 			go func() {
-				log.Printf("Stopping existing control panel %s", describeControlPanelRuntime(running))
-				if err := stopRunningControlPanel(running); err != nil {
-					log.Printf("Failed to stop existing control panel: %v", err)
-					fyne.Do(func() {
-						dialog.ShowError(fmt.Errorf("failed to stop running Control Panel: %w", err), w)
-					})
-					return
+				for _, cp := range conflicts {
+					log.Printf("Stopping existing control panel %s", describeRunningControlPanel(cp))
+					if err := stopRunningControlPanel(cp); err != nil {
+						log.Printf("Failed to stop existing control panel: %v", err)
+						fyne.Do(func() {
+							dialog.ShowError(fmt.Errorf("failed to stop running Control Panel: %w", err), w)
+						})
+						return
+					}
 				}
-
-				if err := writeCurrentControlPanelRuntime(); err != nil {
-					log.Printf("Failed to write control panel runtime metadata: %v", err)
-					fyne.Do(func() {
-						dialog.ShowError(fmt.Errorf("failed to record this Control Panel process: %w", err), w)
-					})
-					return
-				}
-
 				fyne.Do(start)
 			}()
 		},

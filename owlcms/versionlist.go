@@ -13,9 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	customdialog "controlpanel/owlcms/dialog"
@@ -476,20 +474,12 @@ func adjustUpdateButton(mostRecent string, version string, updateButton *widget.
 		targetInstallVersion := computeUpdateTargetVersion(version, mostRecent)
 		updateButton.SetText(fmt.Sprintf("Update to %s", targetInstallVersion))
 		updateButton.OnTapped = func() {
-			currentOS := shared.GetGoos()
-			if currentOS == "linux" || currentOS == "darwin" {
-				data, err := os.ReadFile(pidFilePath)
-				if err == nil && len(data) > 0 {
-					pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-					log.Printf("found pid %d in file %s \n", pid, pidFilePath)
-					if err == nil && pid != 0 {
-						process, err := os.FindProcess(pid)
-						if err == nil && process.Signal(syscall.Signal(0)) == nil {
-							dialog.ShowError(fmt.Errorf("an OWLCMS process is already running with PID %d.\nStop it first. You can use the 'Processes' menu to stop it before updating", pid), w)
-							return
-						}
-					}
-				}
+			if running, err := FindRunningOwlcms(); err != nil {
+				log.Printf("Cannot determine whether OWLCMS is running before update: %v", err)
+			} else if running != nil {
+				dialog.ShowError(fmt.Errorf("OWLCMS is already running with PID %d on port %s.\nStop it first. You can use the 'Processes' menu to stop it before updating",
+					running.Assessment.Listener.PID, running.Port), w)
+				return
 			}
 
 			confirmDialog := dialog.NewConfirm("Backup Suggestion",
