@@ -26,6 +26,8 @@ The control panel is installed once. It will automatically download the correct 
 
 - Stopping an OWLCMS launched by this Control Panel asks OWLCMS to stop itself first, with the launch token, so that its shutdown hooks run and it exits cleanly; before, Windows terminated it outright.
 
+- Removed the systemd-specific mode of 3.3.0 (`controlpanel-*.service` units in which the Control Panel stayed in the foreground to supervise OWLCMS). To start OWLCMS at boot on a Linux server, use a cron `@reboot` entry that runs `controlpanel --instance <name> --batch <file>` with `owlcms start` in the file: OWLCMS is detached behind its Java wrapper, which restarts it when needed, and the Control Panel exits. An existing unit of that kind would now see the Control Panel exit right after the launch.
+
 ### 3.9.0
 
 - The separate Cameras and Replays tabs have been removed. The Video module replaces both programs.

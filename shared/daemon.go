@@ -34,12 +34,6 @@ type RuntimeMetadata struct {
 
 const RunAsDaemonEnv = "CONTROLPANEL_RUN_AS_DAEMON"
 
-// IsRunningUnderSystemd returns true when the current process was started by systemd.
-// systemd sets INVOCATION_ID for service processes, which makes this check cheap and reliable.
-func IsRunningUnderSystemd() bool {
-	return strings.TrimSpace(os.Getenv("INVOCATION_ID")) != ""
-}
-
 // IsRunAsDaemonEnabled returns true when daemon mode is enabled for this control panel process.
 func IsRunAsDaemonEnabled() bool {
 	value := strings.TrimSpace(strings.ToLower(os.Getenv(RunAsDaemonEnv)))
@@ -199,12 +193,9 @@ func PIDMatchesStartTicks(pid int, expected uint64) bool {
 
 // GracefullyStopPID attempts to stop a process while allowing normal shutdown hooks to run.
 //
-// On Unix: sends SIGTERM first.  Java installs a SIGTERM handler that runs
-// shutdown hooks and then exits, so SIGTERM is the cleanest stop signal.
-// SIGINT is skipped — it produces exit code 130 (128+SIGINT) which systemd's
-// Restart=on-failure would treat as a failure, triggering an unwanted restart.
-// Under systemd with SuccessExitStatus=SIGTERM, a SIGTERM death is treated
-// as a clean exit.
+// On Unix: sends SIGTERM. Java installs a SIGTERM handler that runs shutdown
+// hooks and then exits, so SIGTERM is the cleanest stop signal; OWLCMS turns
+// it into exit 0, which no supervisor restarts.
 //
 // On Windows: first tries os.Interrupt when available, then non-forced
 // taskkill. Both are gentler than taskkill /F and give Java a chance to run

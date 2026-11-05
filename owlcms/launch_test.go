@@ -11,7 +11,6 @@ import (
 
 func TestShouldUseOwlcmsDaemonWrapperForDetachedDaemonMode(t *testing.T) {
 	t.Setenv("CONTROLPANEL_RUN_AS_DAEMON", "true")
-	t.Setenv("INVOCATION_ID", "")
 	withOwlcmsGoos(t, "linux")
 
 	if !shouldUseOwlcmsDaemonWrapper() {
@@ -19,13 +18,12 @@ func TestShouldUseOwlcmsDaemonWrapperForDetachedDaemonMode(t *testing.T) {
 	}
 }
 
-func TestShouldUseOwlcmsDaemonWrapperDisabledUnderSystemd(t *testing.T) {
+func TestShouldUseOwlcmsDaemonWrapperOnlyOnLinux(t *testing.T) {
 	t.Setenv("CONTROLPANEL_RUN_AS_DAEMON", "true")
-	t.Setenv("INVOCATION_ID", "systemd-123")
-	withOwlcmsGoos(t, "linux")
+	withOwlcmsGoos(t, "darwin")
 
 	if shouldUseOwlcmsDaemonWrapper() {
-		t.Fatalf("expected systemd launches to skip MainWrapper")
+		t.Fatalf("MainWrapper detachment relies on setsid and is Linux only")
 	}
 }
 

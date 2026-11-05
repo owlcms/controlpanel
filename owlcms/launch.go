@@ -179,8 +179,11 @@ const embeddedMQTTEnv = "OWLCMS_ENABLEEMBEDDEDMQTT"
 
 var owlcmsGoos = shared.GetGoos
 
+// shouldUseOwlcmsDaemonWrapper reports whether a detached launch goes through
+// MainWrapper, which babysits OWLCMS after this process exits. Linux only: it
+// relies on setsid, and Windows and macOS do not detach a daemon.
 func shouldUseOwlcmsDaemonWrapper() bool {
-	return owlcmsGoos() == "linux" && shared.IsRunAsDaemonEnabled() && !shared.IsRunningUnderSystemd()
+	return owlcmsGoos() == "linux" && shared.IsRunAsDaemonEnabled()
 }
 
 func setEnvValue(env []string, key, value string) []string {
@@ -376,13 +379,12 @@ func GetLastRunVersion() string {
 	return strings.TrimSpace(string(data))
 }
 
-// LaunchDaemon starts OWLCMS headlessly (no UI) in daemon mode.
-// Under systemd it stays in the foreground, waits on the process, and restarts
-// on non-zero exit (same supervision as the interactive launcher).
-// Otherwise it detaches the child and returns once the port is ready.
+// LaunchDaemon starts OWLCMS headlessly (no UI) in daemon mode: it detaches
+// the child and returns once the port is ready. On Linux the child is
+// MainWrapper, which relaunches OWLCMS on a restartable exit after this
+// process is gone.
 func LaunchDaemon(version string) error {
-	log.Printf("LaunchDaemon: starting OWLCMS %s headlessly (systemd=%v, INVOCATION_ID=%q)",
-		version, shared.IsRunningUnderSystemd(), os.Getenv("INVOCATION_ID"))
+	log.Printf("LaunchDaemon: starting OWLCMS %s headlessly", version)
 
 	params, err := prepareOwlcmsLaunch(version, nil)
 	if err != nil {
@@ -403,9 +405,6 @@ func LaunchDaemon(version string) error {
 		log.Printf("LaunchDaemon: port %s successfully freed", params.TargetPort)
 	}
 
-	if shared.IsRunningUnderSystemd() {
-		return launchSupervisedForeground(version, params, true)
-	}
 	return launchDaemonDetached(version, params)
 }
 
@@ -428,15 +427,14 @@ func LaunchForeground(version string) error {
 			return fmt.Errorf("port %s is still in use after cleanup", params.TargetPort)
 		}
 	}
-	return launchSupervisedForeground(version, params, false)
+	return launchSupervisedForeground(version, params)
 }
 
 // launchSupervisedForeground starts OWLCMS, waits for readiness, then blocks
-// on cmd.Wait(). It is used by command-line foreground launches and by
-// systemd/docker-style foreground supervision.
-func launchSupervisedForeground(version string, params *owlcmsLaunchParams, daemon bool) error {
+// on cmd.Wait(). It is used by command-line foreground launches (owlcms run).
+func launchSupervisedForeground(version string, params *owlcmsLaunchParams) error {
 	for {
-		waitErr, err := runSupervisedOnce(version, params, daemon)
+		waitErr, err := runSupervisedOnce(version, params)
 		if err != nil {
 			return err
 		}
@@ -463,7 +461,7 @@ func launchSupervisedForeground(version string, params *owlcmsLaunchParams, daem
 
 // runSupervisedOnce starts OWLCMS, waits for readiness, then blocks until it exits.
 // It returns the cmd.Wait() result, or an error if OWLCMS could not be started.
-func runSupervisedOnce(version string, params *owlcmsLaunchParams, daemon bool) (error, error) {
+func runSupervisedOnce(version string, params *owlcmsLaunchParams) (error, error) {
 	cmd := buildOwlcmsCommand(params, false)
 	shared.ConfigureNoConsoleWindow(cmd)
 	env, token := withNewControlPanelToken(params.Env)
@@ -478,7 +476,7 @@ func runSupervisedOnce(version string, params *owlcmsLaunchParams, daemon bool) 
 	}
 
 	pid := cmd.Process.Pid
-	activeRuntime = recordOwlcmsStart(pid, version, params.TargetPort, daemon, token)
+	activeRuntime = recordOwlcmsStart(pid, version, params.TargetPort, false, token)
 	log.Printf("LaunchSupervisedForeground: OWLCMS %s (PID %d), waiting for port %s...", version, pid, params.TargetPort)
 
 	// Wait for the port to come up before declaring success.
@@ -509,7 +507,7 @@ func runSupervisedOnce(version string, params *owlcmsLaunchParams, daemon bool) 
 
 // launchDaemonDetached starts OWLCMS detached using MainWrapper and setsid.
 // It is used by CLI daemon launches where the Java child must survive after
-// the command exits. It is not used by GUI launches or under systemd.
+// the command exits. It is not used by GUI launches.
 func launchDaemonDetached(version string, params *owlcmsLaunchParams) error {
 	useDaemonWrapper := shouldUseOwlcmsDaemonWrapper()
 	cmd := buildOwlcmsCommand(params, useDaemonWrapper)
@@ -574,7 +572,7 @@ func killLockingProcess(w fyne.Window, onDone func(freed bool)) {
 // supervision contract as launchSupervisedForeground — start, wait, restart
 // on non-zero exit — but the wait/restart loop runs inside goroutines so
 // the Fyne UI thread stays responsive.  See launchSupervisedForeground for
-// the synchronous headless equivalent used under systemd.
+// the synchronous headless equivalent used by `owlcms run`.
 func launchOwlcms(version string, launchButton, stopBtn *widget.Button) error {
 	return launchOwlcmsLoading(version, "", launchButton, stopBtn)
 }
@@ -757,7 +755,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 
 			err := <-done
 
-			// Restart decision uses the same rules as Docker/systemd:
+			// Restart decision uses the same rules as Docker and MainWrapper:
 			//   exit 0                   → don't restart (clean shutdown)
 			//   exit non-zero (e.g. 1)   → restart (database import, or unexpected error)
 			//   SIGTERM / SIGINT          → don't restart (intentional stop by user)

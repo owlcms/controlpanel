@@ -730,21 +730,13 @@ func setupSignalHandling() {
 			os.Exit(1)
 		}()
 
-		if shared.IsRunningUnderSystemd() {
-			// Under systemd the Go process owns the child — stop everything
-			// so systemctl stop actually terminates OWLCMS/Tracker.
-			log.Println("Running under systemd — stopping all processes due to signal...")
+		if anyClosableProgramRunning() {
+			log.Printf("Stopping %s due to signal...", joinProgramNames(closableProgramNames()))
 			stopClosableRunningProcessesForSignal()
-			log.Println("All processes stopped.")
-		} else {
-			if anyClosableProgramRunning() {
-				log.Printf("Stopping %s due to signal...", joinProgramNames(closableProgramNames()))
-				stopClosableRunningProcessesForSignal()
-				log.Println("Closable processes stopped.")
-			}
-			if anyDaemonRunning() {
-				log.Printf("Leaving %s running after terminal signal", joinProgramNames(recoveredDaemonProgramNames()))
-			}
+			log.Println("Closable processes stopped.")
+		}
+		if anyDaemonRunning() {
+			log.Printf("Leaving %s running after terminal signal", joinProgramNames(recoveredDaemonProgramNames()))
 		}
 
 		log.Println("Exiting Control Panel...")
