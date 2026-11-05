@@ -127,9 +127,9 @@ func StopRunningOwlcms() (*stopTrace, error) {
 	token := owlcmsTokenFor(a)
 	switch {
 	case envToken != "":
-		trace.add("Token from process environment: %s", envToken)
+		trace.add("Token found in the process environment")
 	case token != "":
-		trace.add("Token not in process environment; using launch token: %s", token)
+		trace.add("Token not in the process environment; using the launch token of this control panel")
 	default:
 		trace.add("No token: not in the process environment and not launched by this control panel")
 	}
