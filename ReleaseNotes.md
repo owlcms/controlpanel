@@ -20,13 +20,11 @@ The control panel is installed once. It will automatically download the correct 
 
 - REPL: `secret encrypt <keyname> <value>` encrypts with the key file `~/.owlcms/<keyname>`, created on first use, so that keys given to other programs are kept apart from the control panel's own key. For example, `secret encrypt apiprotection.aes <value>` for the API keys that OWLCMS decrypts with `~/.owlcms/apiprotection.aes`.
 
-- Starting a Control Panel while another one serves the same instance: "Stop it and continue" now leaves the running OWLCMS, Tracker and Firmata in place and the new Control Panel takes them over; Video is stopped. The first Control Panel is ended without running its own cleanup, on every platform, where before Linux and macOS stopped everything it had launched. The running Control Panel is found from the process table, which also makes startup faster on macOS.
+- Starting a Control Panel while another one serves the same instance: "Stop it and continue" now leaves the running OWLCMS, Tracker and Firmata in place and the new Control Panel takes them over; Video is stopped.
+  - Firmata left running by a previous Control Panel is recognized and can be stopped from the Firmata tab, as OWLCMS and Tracker already were.
+  - Stopping an OWLCMS launched by this Control Panel asks OWLCMS to stop itself first, with the launch token, so that its shutdown hooks run and it exits cleanly; before, Windows terminated it outright.
 
-- Firmata left running by a previous Control Panel is recognized and can be stopped from the Firmata tab, as OWLCMS and Tracker already were.
-
-- Stopping an OWLCMS launched by this Control Panel asks OWLCMS to stop itself first, with the launch token, so that its shutdown hooks run and it exits cleanly; before, Windows terminated it outright.
-
-- Removed the systemd-specific mode of 3.3.0 (`controlpanel-*.service` units in which the Control Panel stayed in the foreground to supervise OWLCMS). To start OWLCMS at boot on a Linux server, use a cron `@reboot` entry that runs `controlpanel --instance <name> --batch <file>` with `owlcms start` in the file: OWLCMS is detached behind its Java wrapper, which restarts it when needed, and the Control Panel exits. An existing unit of that kind would now see the Control Panel exit right after the launch.
+- Removed the systemd-specific mode of 3.3.0 (`controlpanel-*.service` units in which the Control Panel stayed in the foreground to supervise OWLCMS). To start OWLCMS at boot on a Linux server, use a cron `@reboot` entry that runs `controlpanel --instance <name> --batch <file>` with `owlcms start` in the file.
 
 ### 3.9.0
 
