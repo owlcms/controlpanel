@@ -5,7 +5,7 @@ import (
 	"net/url"
 )
 
-const ControlPanelReleasesURL = "https://github.com/owlcms/owlcms-controlpanel/releases"
+const ControlPanelReleasesURL = "https://github.com/owlcms/controlpanel/releases"
 
 // ReleaseAsset is a file attached to a GitHub release.
 type ReleaseAsset struct {

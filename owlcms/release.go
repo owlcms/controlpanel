@@ -282,9 +282,9 @@ func normalizeExtractedDir(extractPath string) error {
 // using the prerelease repository when the version indicates a prerelease.
 func GetReleaseTagURL(version string) string {
 	if containsPreReleaseTag(version) {
-		return fmt.Sprintf("https://github.com/owlcms/owlcms4-prerelease/releases/tag/%s", version)
+		return fmt.Sprintf("https://github.com/owlcms/prereleases/releases/tag/%s", version)
 	}
-	return fmt.Sprintf("https://github.com/owlcms/owlcms4/releases/tag/%s", version)
+	return fmt.Sprintf("https://github.com/owlcms/releases/releases/tag/%s", version)
 }
 
 func confirmAndDownloadVersion(version string, w fyne.Window) {

@@ -40,7 +40,7 @@ var (
 )
 
 func fetchReleases() ([]string, error) {
-	url := "https://api.github.com/repos/owlcms/owlcms-tracker/releases"
+	url := "https://api.github.com/repos/owlcms/tracker/releases"
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -416,7 +416,7 @@ func checkForNewerVersion() {
 				releaseVersion, err := shared.NewVersionForComparison(release)
 				if err == nil && releaseVersion.GreaterThan(latestInstalledVersion) {
 					log.Printf("Tracker - Found newer version: %s\n", release)
-					releaseURL := fmt.Sprintf("https://github.com/owlcms/owlcms-tracker/releases/tag/%s", release)
+					releaseURL := fmt.Sprintf("https://github.com/owlcms/tracker/releases/tag/%s", release)
 
 					var versionType string
 					if !shared.ShouldProposeUpdate(latestInstalled, release) {
@@ -451,7 +451,7 @@ func checkForNewerVersion() {
 			}
 
 			// Show message with release notes link (no newer version found)
-			releaseURL := fmt.Sprintf("https://github.com/owlcms/owlcms-tracker/releases/tag/%s", latestInstalled)
+			releaseURL := fmt.Sprintf("https://github.com/owlcms/tracker/releases/tag/%s", latestInstalled)
 			parsedURL, _ := url.Parse(releaseURL)
 			releaseNotesLink := widget.NewHyperlink("Release Notes", parsedURL)
 			// Ensure hyperlink visible for installed prerelease/stable

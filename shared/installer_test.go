@@ -4,11 +4,11 @@ import "testing"
 
 func TestControlPanelInstallerLink(t *testing.T) {
 	assets := []ReleaseAsset{
-		{"Linux_Control_Panel_Installer.deb", "https://github.com/owlcms/owlcms-controlpanel/releases/download/3.8.1/Linux_Control_Panel_Installer.deb"},
-		{"macOS_Intel_OWLCMS.dmg", "https://github.com/owlcms/owlcms-controlpanel/releases/download/3.8.1/macOS_Intel_OWLCMS.dmg"},
-		{"macOS_OWLCMS.dmg", "https://github.com/owlcms/owlcms-controlpanel/releases/download/3.8.1/macOS_OWLCMS.dmg"},
+		{"Linux_Control_Panel_Installer.deb", "https://github.com/owlcms/controlpanel/releases/download/3.8.1/Linux_Control_Panel_Installer.deb"},
+		{"macOS_Intel_OWLCMS.dmg", "https://github.com/owlcms/controlpanel/releases/download/3.8.1/macOS_Intel_OWLCMS.dmg"},
+		{"macOS_OWLCMS.dmg", "https://github.com/owlcms/controlpanel/releases/download/3.8.1/macOS_OWLCMS.dmg"},
 		{"Raspberry_Pi_arm64_Control_Panel_Installer.deb", ""},
-		{"Windows_Control_Panel_Installer.exe", "https://github.com/owlcms/owlcms-controlpanel/releases/download/3.8.1/Windows_Control_Panel_Installer.exe"},
+		{"Windows_Control_Panel_Installer.exe", "https://github.com/owlcms/controlpanel/releases/download/3.8.1/Windows_Control_Panel_Installer.exe"},
 	}
 	cases := []struct {
 		goos, goarch string

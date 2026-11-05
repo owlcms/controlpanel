@@ -72,9 +72,9 @@ func InstallRelease(downloadVersion, installVersion string, progress shared.Prog
 
 	var urlPrefix string
 	if containsPreReleaseTag(downloadVersion) {
-		urlPrefix = "https://github.com/owlcms/owlcms4-prerelease/releases/download"
+		urlPrefix = "https://github.com/owlcms/prereleases/releases/download"
 	} else {
-		urlPrefix = "https://github.com/owlcms/owlcms4/releases/download"
+		urlPrefix = "https://github.com/owlcms/releases/releases/download"
 	}
 	fileName := fmt.Sprintf("owlcms_%s.zip", downloadVersion)
 	zipURL := fmt.Sprintf("%s/%s/%s", urlPrefix, downloadVersion, fileName)
@@ -139,9 +139,9 @@ func UpdateRelease(existingVersion, targetVersion string, progress shared.Progre
 
 	var urlPrefix string
 	if containsPreReleaseTag(targetVersion) {
-		urlPrefix = "https://github.com/owlcms/owlcms4-prerelease/releases/download"
+		urlPrefix = "https://github.com/owlcms/prereleases/releases/download"
 	} else {
-		urlPrefix = "https://github.com/owlcms/owlcms4/releases/download"
+		urlPrefix = "https://github.com/owlcms/releases/releases/download"
 	}
 	fileName := fmt.Sprintf("owlcms_%s.zip", targetVersion)
 	zipURL := fmt.Sprintf("%s/%s/%s", urlPrefix, targetVersion, fileName)

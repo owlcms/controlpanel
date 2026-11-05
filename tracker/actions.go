@@ -60,7 +60,7 @@ func ResolveUpdateRelease(selector, fromVersion string) (string, error) {
 func releaseAssetURL(version string) (string, string, error) {
 	assetNames := getAssetNames(version)
 	for _, name := range assetNames {
-		assetURL := fmt.Sprintf("https://github.com/owlcms/owlcms-tracker/releases/download/%s/%s", version, name)
+		assetURL := fmt.Sprintf("https://github.com/owlcms/tracker/releases/download/%s/%s", version, name)
 		if checkAssetExists(assetURL) {
 			return assetURL, name, nil
 		}

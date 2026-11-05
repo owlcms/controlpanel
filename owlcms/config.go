@@ -996,9 +996,9 @@ func CheckForUpdates(win fyne.Window, showConfirmation bool) {
 	// If current is a prerelease, check all releases; otherwise just check latest stable
 	var repoURL string
 	if isCurrentPrerelease {
-		repoURL = "https://api.github.com/repos/owlcms/owlcms-controlpanel/releases"
+		repoURL = "https://api.github.com/repos/owlcms/controlpanel/releases"
 	} else {
-		repoURL = "https://api.github.com/repos/owlcms/owlcms-controlpanel/releases/latest"
+		repoURL = "https://api.github.com/repos/owlcms/controlpanel/releases/latest"
 	}
 	log.Println("Checking for updates from:", repoURL)
 
