@@ -38,3 +38,7 @@ owlcms-launcher.exe~
 
 scripts/.DS_Store
 .DS_Store
+
+# portprobe diagnostic CLI builds (go build -o portprobe ./cmd/portprobe)
+/portprobe
+/portprobe-*
