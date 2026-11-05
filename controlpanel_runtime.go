@@ -29,9 +29,10 @@ const controlPanelInstallDirEnv = "CONTROLPANEL_INSTALLDIR"
 
 // findRunningControlPanels lists Control Panel processes other than this one
 // and its ancestors, identified from the OS process table rather than from
-// recorded startup files.
+// recorded startup files. Only processes with a Control Panel executable name
+// are inspected; a full inventory took 20 s on macOS.
 func findRunningControlPanels() ([]runningControlPanel, error) {
-	processes, err := portowner.ListProcesses()
+	processes, err := portowner.ListProcessesNamed(portowner.ControlPanelExecutableNames...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,8 +119,14 @@ func describeRunningControlPanel(cp runningControlPanel) string {
 	return strings.Join(parts, ", ")
 }
 
-// stopRunningControlPanel stops cp, verifying before each signal that the PID
-// still belongs to the same process.
+// stopRunningControlPanel ends cp without letting it run its shutdown
+// handlers, verifying first that the PID still belongs to the same process.
+// A soft stop would make cp stop the servers it supervises (its signal cleanup
+// does so); killing it outright leaves OWLCMS, Tracker and Firmata running as
+// orphans, which this Control Panel then adopts. Video is a desktop
+// application and is not adopted: it is stopped first. Windows already
+// skipped the cleanup because taskkill /F is its only termination; this makes
+// Linux and macOS match and stops Video on all three.
 func stopRunningControlPanel(cp runningControlPanel) error {
 	id := cp.Identity
 	validate := func() error {
@@ -133,11 +140,33 @@ func stopRunningControlPanel(cp runningControlPanel) error {
 		return nil
 	}
 	report := func(line string) { log.Printf("Stopping Control Panel PID %d: %s", id.PID, line) }
-	err := portowner.Stop(id, validate, report)
+	stopVideoChildren(id, report)
+	err := portowner.Kill(id, validate, report)
 	if err != nil && strings.Contains(err.Error(), "already exited") {
 		return nil
 	}
 	return err
+}
+
+// stopVideoChildren stops the Video processes cp launched. Failures are logged:
+// a Video left running only holds its own window and port.
+func stopVideoChildren(cp portowner.Identity, report func(string)) {
+	videos, err := portowner.ListProcessesMatching(portowner.IsVideoExecutable)
+	if err != nil {
+		report(fmt.Sprintf("Cannot list Video processes: %v", err))
+		return
+	}
+	for _, v := range videos {
+		if v.Parent != cp.PID || v.Created < cp.Created {
+			continue
+		}
+		child := v
+		validate := func() error { return portowner.ValidateParent(child, cp) }
+		report(fmt.Sprintf("Stopping its Video, PID %d", child.PID))
+		if err := portowner.Stop(child, validate, report); err != nil {
+			report(fmt.Sprintf("Could not stop Video PID %d: %v", child.PID, err))
+		}
+	}
 }
 
 // removeLegacyControlPanelRuntimeFiles deletes the startup files older

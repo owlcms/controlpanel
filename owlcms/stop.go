@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -176,6 +177,42 @@ func StopRunningOwlcms() (*stopTrace, error) {
 	}
 	trace.add("Port %s is free", running.Port)
 	return trace, nil
+}
+
+// stopOwnedOwlcms stops the OWLCMS this control panel launched and still holds a
+// process handle for. It asks OWLCMS to stop itself first, so its shutdown hooks
+// run and it exits 0; on Windows the process handle can only TerminateProcess,
+// which skips them. The process handle is the fallback when the request is not
+// accepted or OWLCMS has not exited 20 s later.
+func stopOwnedOwlcms(cmd *exec.Cmd, port string) error {
+	pid := cmd.Process.Pid
+	token := strings.TrimSpace(portowner.EnvValue(int32(pid), controlPanelTokenEnv))
+	if token == "" {
+		token = runningOwlcmsToken()
+	}
+	log.Printf("Stopping owned OWLCMS PID %d on port %s: HTTP stop (token %s)", pid, port, presence(token))
+	if err := requestOwlcmsStop(port, token); err != nil {
+		log.Printf("OWLCMS PID %d: HTTP stop not accepted (%v); stopping through the process handle", pid, err)
+		return shared.StopOwnedProcess(cmd, 10*time.Second)
+	}
+	// the port is released before the shutdown hooks finish; wait for the process
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if !shared.IsProcessRunning(pid) {
+			log.Printf("OWLCMS PID %d exited after the HTTP stop", pid)
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	log.Printf("OWLCMS PID %d still running 20 s after accepting the stop; stopping through the process handle", pid)
+	return shared.StopOwnedProcess(cmd, 10*time.Second)
+}
+
+func presence(token string) string {
+	if token == "" {
+		return "absent"
+	}
+	return "present"
 }
 
 func requestOwlcmsStop(port, token string) error {

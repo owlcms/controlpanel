@@ -14,6 +14,7 @@ import (
 	customdialog "controlpanel/firmata/dialog"
 	"controlpanel/firmata/javacheck"
 	"controlpanel/shared"
+	"controlpanel/shared/portowner"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -162,9 +163,9 @@ func uninstallAll() {
 	}, fyne.CurrentApp().Driver().AllWindows()[0])
 }
 
-// IsRunning returns true if Firmata is currently running
+// IsRunning returns true if Firmata is currently running, launched or adopted
 func IsRunning() bool {
-	return currentProcess != nil
+	return currentProcess != nil || adoptedProcess != nil
 }
 
 // StopRunningProcess stops the running Firmata process
@@ -172,11 +173,24 @@ func StopRunningProcess(w fyne.Window) {
 	if currentProcess != nil && currentProcess.Process != nil {
 		log.Println("Stopping Firmata process")
 		stopProcess(currentProcess, currentVersion, stopButton, downloadContainer, versionContainer, statusLabel, w)
+		return
+	}
+	if adoptedProcess != nil {
+		// called while the control panel exits: stop before returning
+		id := *adoptedProcess
+		adoptedProcess = nil
+		log.Printf("Stopping adopted owlcms-firmata PID %d", id.PID)
+		report := func(line string) { log.Printf("Stopping adopted owlcms-firmata: %s", line) }
+		if err := portowner.Stop(id, func() error { return portowner.ValidateAlive(id) }, report); err != nil {
+			log.Printf("Could not stop adopted owlcms-firmata PID %d: %v", id.PID, err)
+		}
+		releaseJavaLock()
 	}
 }
 
 // HandleSignalCleanup handles cleanup when the application receives a signal
 func HandleSignalCleanup() {
+	killAdoptedFirmata()
 	if currentProcess != nil && currentProcess.Process != nil {
 		pid := currentProcess.Process.Pid
 		log.Printf("Forcefully stopping Firmata (PID: %d)...\n", pid)
@@ -582,7 +596,13 @@ func refreshAvailableVersions(w fyne.Window) {
 
 // initializeFirmataTab handles the async initialization of the Firmata tab
 func initializeFirmataTab(w fyne.Window) {
+	running, version := findRunningFirmata()
 	fyne.Do(func() {
+		if running != nil {
+			adoptRunningFirmata(running, version)
+			log.Println("Firmata tab reattached to existing process.")
+			return
+		}
 		// Set the appropriate mode based on installed versions
 		if len(getAllInstalledVersions()) == 0 {
 			setFirmataTabModeUninstalled(w)

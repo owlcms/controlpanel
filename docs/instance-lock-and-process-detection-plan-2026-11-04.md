@@ -97,7 +97,9 @@ If polite stop fails because an older version lacks the endpoint, or the token i
 
 ### Supervisors and restarts
 
-A port owner can be restarted by another Control Panel, systemd, or another supervisor. An HTTP clean stop is preferable for known OWLCMS, but it does not guarantee every external supervisor will leave it stopped.
+A port owner can be restarted by another Control Panel or by MainWrapper. An HTTP clean stop is preferable for known OWLCMS, but it does not guarantee every external supervisor will leave it stopped.
+
+The Control Panel no longer has a systemd mode (removed in 3.10.0; it kept the Control Panel in the foreground as the service's main process). On Linux, `owlcms start` always detaches OWLCMS behind MainWrapper and exits; boot-time start is a cron `@reboot` entry running `controlpanel --batch`. A systemd unit is therefore not an expected supervisor of a Control Panel.
 
 Known restart rules:
 
@@ -107,7 +109,7 @@ Known restart rules:
 
 When this Control Panel owns the child, suppress its own restart before the stop and coordinate with the monitoring goroutine. A parent can itself be an OWLCMS Java wrapper such as `MainWrapper`, or an older Control Panel. For a recovered or foreign process, inspect the parent and available supervisor information; absence of such evidence does not prove there is no supervisor, and a parent PID alone does not establish that it supervises the child.
 
-The listener and an external parent require **two separate confirmations**. Describe the parent and its possible effects, and revalidate its identity and relationship before acting. A parent may manage other modules; confirmation to stop the parent does not authorize killing its whole process tree. If the user declines to stop it, explain that the listener may restart; still follow the separate listener confirmation and report any replacement. Do not kill an unidentified system process, shell, launchd, or systemd itself; for a service manager, stopping the appropriate service is a separate authorized operation. If safe parent handling is unavailable, report the limitation rather than guessing.
+The listener and an external parent require **two separate confirmations**. Describe the parent and its possible effects, and revalidate its identity and relationship before acting. A parent may manage other modules; confirmation to stop the parent does not authorize killing its whole process tree. If the user declines to stop it, explain that the listener may restart; still follow the separate listener confirmation and report any replacement. Do not kill an unidentified system process, shell, launchd, or init; if safe parent handling is unavailable, report the limitation rather than guessing.
 
 After each stop, verify the port. If it becomes occupied again, report the new PID and possible supervision. Do not automatically chase or repeatedly kill replacement processes; any further stop requires renewed confirmation.
 
@@ -122,7 +124,7 @@ After each stop, verify the port. If it becomes occupied again, report the new P
 ## Scope and compatibility
 
 - Preserve multiple separately configured instances on different ports; no per-instance lock is added.
-- Keep the existing duplicate-Control-Panel check and its \"Stop Existing and Continue\" behavior unchanged.
+- The duplicate-Control-Panel check keeps its "Stop it and continue" dialog, but the first Control Panel is now ended without running its own cleanup, on every platform. Its OWLCMS, Tracker and Firmata stay up and are adopted by the new Control Panel; its Video is stopped first. Before, Linux and macOS sent SIGTERM, whose handler stopped everything the first Control Panel had launched; Windows already skipped that handler because `taskkill /F` was its only termination.
 - Apply shared process-check changes carefully to Tracker and other callers; preserve their existing lifecycle semantics.
 - No OWLCMS changes are required.
 - Older versions need not have written new metadata or an HTTP endpoint. Never assume a PID file is current.

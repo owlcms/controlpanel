@@ -60,6 +60,10 @@ func monitorProcess(done <-chan error, port string) chan error {
 }
 
 func stopProcess(curProcess *exec.Cmd, curVersion string, stopBtn *widget.Button, downloadGroup, versionCont *fyne.Container, statusLbl *widget.Label, w fyne.Window) {
+	if (curProcess == nil || curProcess.Process == nil) && adoptedProcess != nil {
+		stopAdoptedFirmata(statusLbl, w)
+		return
+	}
 	log.Printf("Stopping owlcms-firmata %s...\n", curVersion)
 	statusLbl.SetText(fmt.Sprintf("Stopping owlcms-firmata %s...", curVersion))
 

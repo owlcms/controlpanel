@@ -50,6 +50,8 @@ const (
 	KindOwlcmsProbably = "probably OWLCMS (Java in an owlcms directory)"
 	KindControlPanel   = "Control Panel"
 	KindTracker        = "probably Tracker (node)"
+	KindFirmata        = "owlcms-firmata (java -jar owlcms-firmata.jar)"
+	KindVideo          = "Video"
 	KindUnrecognized   = "unrecognized"
 )
 
@@ -137,6 +139,13 @@ func Inspect(pid int32) (Identity, error) {
 	args := commandArgs(p, cmdline)
 	cwd, err := p.Cwd()
 	if err != nil || cwd == "" {
+		cwd = ""
+		if GOOS == "darwin" {
+			// this gopsutil version has no Cwd on macOS
+			cwd = darwinCwd(pid)
+		}
+	}
+	if cwd == "" {
 		// Windows refuses the working directory of elevated processes
 		cwd = "(unavailable)"
 	}
@@ -234,14 +243,64 @@ func darwinEnvValue(pid int32, key string) string {
 	return string(m[1])
 }
 
+// darwinCwd reads the working directory with lsof, which this gopsutil version
+// does not offer on macOS. Returns "" when lsof is missing, access is denied,
+// or the process is gone. lsof -F emits one field per line; "n" is the name.
+func darwinCwd(pid int32) string {
+	out, err := exec.Command("lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(int(pid)), "-Fn").Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if path, ok := strings.CutPrefix(line, "n"); ok && path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
 // ListProcesses returns a fresh observation of every inspectable process.
+// Each Inspect may spawn helper commands (lsof, ps on macOS); prefer
+// ListProcessesNamed when only a few executables are of interest.
 func ListProcesses() ([]Identity, error) {
+	return listProcesses(nil)
+}
+
+// ListProcessesNamed returns a fresh observation of the processes whose
+// executable base name, lower-cased, is one of names. Only matching processes
+// are fully inspected, so this is cheap enough to run at startup.
+func ListProcessesNamed(names ...string) ([]Identity, error) {
+	wanted := make(map[string]bool, len(names))
+	for _, n := range names {
+		wanted[strings.ToLower(n)] = true
+	}
+	return ListProcessesMatching(func(name string) bool { return wanted[name] })
+}
+
+// ListProcessesMatching returns a fresh observation of the processes whose
+// lower-cased executable base name satisfies match. gopsutil restores names
+// the kernel truncates (15 characters on Linux, 16 on macOS).
+func ListProcessesMatching(match func(name string) bool) ([]Identity, error) {
+	return listProcesses(match)
+}
+
+func listProcesses(match func(name string) bool) ([]Identity, error) {
 	pids, err := process.Pids()
 	if err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
 	var result []Identity
 	for _, pid := range pids {
+		if match != nil {
+			p, err := process.NewProcess(pid)
+			if err != nil {
+				continue
+			}
+			name, err := p.Name()
+			if err != nil || !match(strings.ToLower(filepath.Base(name))) {
+				continue
+			}
+		}
 		id, err := Inspect(pid)
 		if err != nil {
 			continue
@@ -273,6 +332,31 @@ func TrimCommand(cmdline string) string {
 	return trimmed
 }
 
+// ControlPanelExecutableNames are the executable base names a Control Panel
+// runs under: released builds are owlcms(.exe), development builds
+// controlpanel(.exe). Classify and ListProcessesNamed callers share this list.
+var ControlPanelExecutableNames = []string{
+	"controlpanel", "controlpanel.exe", "owlcms", "owlcms.exe", "owlcms_controlpanel.exe",
+}
+
+func isControlPanelExecutable(exe string) bool {
+	for _, n := range ControlPanelExecutableNames {
+		if exe == n {
+			return true
+		}
+	}
+	return false
+}
+
+// IsVideoExecutable reports whether a lower-cased executable base name is the
+// Video module binary: video_windows.exe, video_darwin_arm64, video_linux_amd64…
+func IsVideoExecutable(exe string) bool {
+	return strings.HasPrefix(exe, "video_")
+}
+
+// JavaExecutableNames are the base names of a Java runtime launcher.
+var JavaExecutableNames = []string{"java", "java.exe", "javaw", "javaw.exe"}
+
 // Classify guesses what a process is. It is a display hint, never a reason to
 // stop anything.
 func Classify(id Identity) string {
@@ -285,6 +369,10 @@ func Classify(id Identity) string {
 	cwd := strings.ToLower(id.Cwd)
 	isJava := exe == "java" || exe == "java.exe" || exe == "javaw" || exe == "javaw.exe"
 	switch {
+	// before the OWLCMS cases: firmata runs in owlcms-firmata/<version>, a directory
+	// whose name contains "owlcms"
+	case isJava && strings.Contains(cmdline, "owlcms-firmata.jar"):
+		return KindFirmata
 	case isJava && strings.Contains(cmdline, "app.owlcms.mainwrapper"):
 		return KindMainWrapper
 	case isJava && strings.Contains(cmdline, "app.owlcms.main"):
@@ -293,10 +381,10 @@ func Classify(id Identity) string {
 		return KindOwlcmsJar
 	case isJava && strings.Contains(cwd, "owlcms"):
 		return KindOwlcmsProbably
-	// Released Control Panels are named owlcms(.exe); development builds controlpanel(.exe).
-	case exe == "controlpanel" || exe == "controlpanel.exe" || exe == "owlcms" || exe == "owlcms.exe" ||
-		exe == "owlcms_controlpanel.exe":
+	case isControlPanelExecutable(exe):
 		return KindControlPanel
+	case IsVideoExecutable(exe):
+		return KindVideo
 	case (exe == "node" || exe == "node.exe") &&
 		(strings.Contains(cmdline, "tracker") || strings.Contains(cwd, "tracker")):
 		return KindTracker
@@ -551,6 +639,28 @@ func Stop(id Identity, validate func() error, report func(string)) error {
 		if err := validate(); err != nil {
 			return err
 		}
+	}
+	report(fmt.Sprintf("Requesting forced termination of PID %d", id.PID))
+	if err := terminate(id.PID, true); err != nil {
+		return fmt.Errorf("forced termination failed: %w", err)
+	}
+	exited, err := WaitForExit(id, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	if !exited {
+		return fmt.Errorf("PID %d is still running after forced termination", id.PID)
+	}
+	return nil
+}
+
+// Kill ends id with forced termination only, skipping the soft step. Use it
+// when the target must not run its own shutdown handlers: a Control Panel
+// asked to yield its instance would otherwise stop the OWLCMS it supervises,
+// which the caller intends to adopt. validate runs before the signal.
+func Kill(id Identity, validate func() error, report func(string)) error {
+	if err := validate(); err != nil {
+		return err
 	}
 	report(fmt.Sprintf("Requesting forced termination of PID %d", id.PID))
 	if err := terminate(id.PID, true); err != nil {

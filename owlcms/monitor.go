@@ -68,9 +68,7 @@ func stopProcess(version string, stopBtn *widget.Button, downloadGroup, versionC
 	go func() {
 		var err error
 		if currentProcess != nil && currentProcess.Process != nil {
-			pid := currentProcess.Process.Pid
-			log.Printf("Stopping owned OWLCMS process with Go process handle (PID: %d)", pid)
-			err = shared.StopOwnedProcess(currentProcess, 10*time.Second)
+			err = stopOwnedOwlcms(currentProcess, port)
 		} else {
 			// the stages are written to the log as "Stop trace: ..." by StopRunningOwlcms
 			_, err = StopRunningOwlcms()

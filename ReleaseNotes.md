@@ -20,6 +20,12 @@ The control panel is installed once. It will automatically download the correct 
 
 - REPL: `secret encrypt <keyname> <value>` encrypts with the key file `~/.owlcms/<keyname>`, created on first use, so that keys given to other programs are kept apart from the control panel's own key. For example, `secret encrypt apiprotection.aes <value>` for the API keys that OWLCMS decrypts with `~/.owlcms/apiprotection.aes`.
 
+- Starting a Control Panel while another one serves the same instance: "Stop it and continue" now leaves the running OWLCMS, Tracker and Firmata in place and the new Control Panel takes them over; Video is stopped. The first Control Panel is ended without running its own cleanup, on every platform, where before Linux and macOS stopped everything it had launched. The running Control Panel is found from the process table, which also makes startup faster on macOS.
+
+- Firmata left running by a previous Control Panel is recognized and can be stopped from the Firmata tab, as OWLCMS and Tracker already were.
+
+- Stopping an OWLCMS launched by this Control Panel asks OWLCMS to stop itself first, with the launch token, so that its shutdown hooks run and it exits cleanly; before, Windows terminated it outright.
+
 ### 3.9.0
 
 - The separate Cameras and Replays tabs have been removed. The Video module replaces both programs.

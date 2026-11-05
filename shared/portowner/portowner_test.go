@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,6 +26,28 @@ func TestInspectCurrentProcess(t *testing.T) {
 	id.Created++
 	if _, err := SameProcess(id); err == nil {
 		t.Fatal("expected changed creation time to be rejected")
+	}
+}
+
+// The OWLCMS adoption gate compares the working directory with the install
+// directory, so Inspect must report it on every supported OS.
+func TestInspectReportsWorkingDirectory(t *testing.T) {
+	id, err := Inspect(int32(os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Cwd == "(unavailable)" {
+		t.Fatalf("working directory not reported on %s", GOOS)
+	}
+	// /private/var vs /var on macOS, 8.3 names on Windows: compare resolved paths
+	got, _ := filepath.EvalSymlinks(id.Cwd)
+	want, _ = filepath.EvalSymlinks(want)
+	if !strings.EqualFold(got, want) {
+		t.Fatalf("cwd %q, want %q", id.Cwd, want)
 	}
 }
 
@@ -57,6 +80,12 @@ func TestClassify(t *testing.T) {
 		{Identity{Executable: "/usr/local/bin/controlpanel"}, KindControlPanel},
 		{Identity{Executable: `C:\Program Files\owlcms\owlcms.exe`}, KindControlPanel},
 		{Identity{Executable: "/usr/bin/node", Cmdline: "node tracker/dist/index.js"}, KindTracker},
+		// Firmata runs from owlcms-firmata/<version>: must not be taken for OWLCMS
+		{Identity{Executable: "/opt/jdk/bin/java", Cmdline: "java -jar owlcms-firmata.jar --port 8090",
+			Cwd: "/home/u/.local/share/owlcms-firmata/2.8.1"}, KindFirmata},
+		{Identity{Executable: `C:\jdk\bin\java.exe`, Cmdline: `java.exe -DjSerialComm.library.path=x -jar owlcms-firmata.jar`}, KindFirmata},
+		{Identity{Executable: "/Users/u/Library/Application Support/owlcms-video/3.0.2/video_darwin_arm64"}, KindVideo},
+		{Identity{Executable: `C:\Users\u\AppData\Roaming\owlcms-video\3.0.2\video_windows.exe`}, KindVideo},
 		{Identity{Executable: "/usr/bin/python3", Cmdline: "python3 -m http.server"}, KindUnrecognized},
 	} {
 		if got := Classify(tc.id); got != tc.want {
@@ -74,6 +103,10 @@ func TestSupervisorAndOwlcms(t *testing.T) {
 	}
 	if !IsOwlcms(server) || IsOwlcms(wrapper) || IsOwlcms(cp) {
 		t.Error("OWLCMS server classification is wrong")
+	}
+	firmata := Identity{Executable: "java", Cmdline: "java -jar owlcms-firmata.jar", Cwd: "/x/owlcms-firmata/2.8.1"}
+	if IsOwlcms(firmata) || IsSupervisor(firmata) {
+		t.Error("Firmata must be neither OWLCMS nor a supervisor")
 	}
 }
 
