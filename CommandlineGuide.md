@@ -49,6 +49,17 @@ controlpanel[records]> owlcms start A
 controlpanel[records]> tracker start 8096
 ```
 
+Typing `owlcms` or `tracker` alone sets a default module: the following commands are run as if that word came first, until the other module name is typed alone. The prompt shows the default. Commands that begin with `owlcms` or `tracker` followed by other words work as usual, as do `context`, `secret`, `exit` and `quit`.
+
+```text
+controlpanel> owlcms
+controlpanel owlcms> versions
+controlpanel owlcms> A port 8080
+controlpanel owlcms> start A
+controlpanel owlcms> tracker
+controlpanel tracker> start 8096
+```
+
 ## Batch Mode
 
 Run the same commands from a file, or use `-` for standard input. A batch stops at its first error and returns a non-zero status.

@@ -19,7 +19,11 @@ type replInvocation struct {
 	interactive bool
 }
 
-type replSession struct{}
+// replSession holds the default module ("owlcms" or "tracker", empty when unset) that is
+// prepended to commands which do not start with a global command or a module name.
+type replSession struct {
+	module string
+}
 
 func parseREPLInvocation(args []string) (replInvocation, bool, error) {
 	var invocation replInvocation
@@ -98,10 +102,14 @@ func runREPL(invocation replInvocation, session replSession, in io.Reader, out, 
 
 func (session replSession) prompt() string {
 	instance := strings.TrimSpace(os.Getenv("CONTROLPANEL_INSTANCE"))
-	if instance == "" || isMainInstance(instance) {
-		return "controlpanel> "
+	name := "controlpanel"
+	if instance != "" && !isMainInstance(instance) {
+		name = fmt.Sprintf("controlpanel[%s]", instance)
 	}
-	return fmt.Sprintf("controlpanel[%s]> ", instance)
+	if session.module != "" {
+		name += " " + session.module
+	}
+	return name + "> "
 }
 
 func executeREPLLine(line string, session *replSession, out io.Writer) (bool, error) {
@@ -113,7 +121,22 @@ func executeREPLLine(line string, session *replSession, out io.Writer) (bool, er
 		return false, nil
 	}
 
-	switch strings.ToLower(args[0]) {
+	command := strings.ToLower(args[0])
+	switch command {
+	case "owlcms", "tracker":
+		if len(args) == 1 {
+			session.module = command
+			return false, nil
+		}
+	case "exit", "quit", "context", "secret":
+	default:
+		if session.module != "" {
+			args = append([]string{session.module}, args...)
+			command = session.module
+		}
+	}
+
+	switch command {
 	case "exit", "quit":
 		if len(args) != 1 {
 			return false, fmt.Errorf("%s takes no arguments", args[0])
@@ -221,6 +244,7 @@ func writeREPLContext(out io.Writer) {
 func writeREPLHelp(out io.Writer) {
 	fmt.Fprintln(out, "Commands: context, help, exit, quit")
 	fmt.Fprintln(out, "  secret encrypt <keyname> <value>   print the value encrypted with ~/.owlcms/<keyname> (enc:v1:...)")
+	fmt.Fprintln(out, "Type 'owlcms' or 'tracker' alone to make it the default module for the following commands.")
 	fmt.Fprintln(out, "Use 'owlcms help' for OWLCMS commands.")
 	fmt.Fprintln(out, "Use 'tracker help' for Tracker commands.")
 }

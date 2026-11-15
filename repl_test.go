@@ -207,6 +207,48 @@ func TestREPLPromptUsesStartupSelectedInstance(t *testing.T) {
 	}
 }
 
+func TestREPLDefaultModule(t *testing.T) {
+	t.Setenv("CONTROLPANEL_INSTANCE", "")
+	var output bytes.Buffer
+	session := &replSession{}
+	run := func(line string) {
+		t.Helper()
+		if _, err := executeREPLLine(line, session, &output); err != nil {
+			t.Fatalf("%q returned error: %v", line, err)
+		}
+	}
+
+	run("owlcms")
+	if session.module != "owlcms" || session.prompt() != "controlpanel owlcms> " {
+		t.Fatalf("expected owlcms default, got %q / %q", session.module, session.prompt())
+	}
+	run("help")
+	if !strings.Contains(output.String(), "OWLCMS commands:") {
+		t.Fatalf("help should apply to the default module, got %q", output.String())
+	}
+
+	output.Reset()
+	run("tracker help")
+	if session.module != "owlcms" || !strings.Contains(output.String(), "Tracker commands:") {
+		t.Fatalf("tracker with arguments must not change the default, got %q / %q", session.module, output.String())
+	}
+
+	run("tracker")
+	if session.module != "tracker" {
+		t.Fatalf("expected tracker default, got %q", session.module)
+	}
+	output.Reset()
+	run("help")
+	if !strings.Contains(output.String(), "Tracker commands:") {
+		t.Fatalf("help should apply to the tracker default, got %q", output.String())
+	}
+	output.Reset()
+	run("context")
+	if !strings.Contains(output.String(), "instance:") {
+		t.Fatalf("context must stay global, got %q", output.String())
+	}
+}
+
 func TestREPLCommandChangesVersions(t *testing.T) {
 	for _, action := range []string{"install", "install-zip", "update", "rename", "duplicate", "remove"} {
 		if !replCommandChangesVersions(action) {
