@@ -16,3 +16,15 @@ Currently supported: Windows, macOS, Raspberry Pi, Linux on Intel<br>
 
 See the [OWLCMS Control Panel documentation](https://jflamy.github.io/owlcms4/#/010-RunningLocally/010-LocalControlPanel) for installation and usage details.
 
+### Launching Tracker with OWLCMS
+
+In the OWLCMS tab, choose **Options > Default Tracker Connection** and enable
+**Launch the latest locally installed tracker and connect when starting OWLCMS**. Each
+OWLCMS version can override this default in its own Tracker Connection options.
+The usual connection settings are retained but ignored while automatic launch is
+enabled. Graphical launches use the latest installed Tracker's local port and
+shared key. If that Tracker is already running, it is reused; a different running
+version is reported as a conflict. Tracker stops when OWLCMS stops.
+
+This option applies only to graphical launches, not REPL or batch commands.
+

@@ -33,6 +33,7 @@ const (
 	trackerConnectionURLSetting        = "CONTROLPANEL_TRACKER_URL"
 	trackerConnectionPortSetting       = "CONTROLPANEL_TRACKER_PORT"
 	trackerConnectionDefaultEnabledKey = "CONTROLPANEL_TRACKER_CONNECTION_ENABLED_BY_DEFAULT"
+	trackerAutoLaunchSetting           = "CONTROLPANEL_TRACKER_AUTO_LAUNCH"
 	// folder kept up to date by the tracker's Checkpoints plugin; OWLCMS can be launched from it
 	checkpointFolderSetting = "CONTROLPANEL_CHECKPOINT_FOLDER"
 )
@@ -202,6 +203,32 @@ func trackerConnectionEnabled(value string) bool {
 
 func defaultTrackerConnectionSettings() (string, string) {
 	return defaultTrackerConnectionURL, tracker.GetPort()
+}
+
+// TrackerAutoLaunchForRelease reports the inherited or version-specific GUI launch setting.
+func TrackerAutoLaunchForRelease(releaseVersion string) (bool, error) {
+	if err := InitEnv(); err != nil {
+		return false, err
+	}
+	value, _ := environment.Get(trackerAutoLaunchSetting)
+	props, err := loadReleaseProperties(releaseVersion)
+	if err != nil {
+		return false, err
+	}
+	if props != nil {
+		if override, ok := props.Get(trackerAutoLaunchSetting); ok {
+			value = override
+		}
+	}
+	return trackerConnectionEnabled(value), nil
+}
+
+func defaultTrackerAutoLaunch() bool {
+	if environment == nil {
+		return false
+	}
+	value, _ := environment.Get(trackerAutoLaunchSetting)
+	return trackerConnectionEnabled(value)
 }
 
 // SaveDefaultTrackerConnection saves the endpoint independently of whether new
@@ -456,6 +483,7 @@ func ensureReleaseEnvFromCurrentParent(releaseVersion string) (*properties.Prope
 		return nil, fmt.Errorf("failed to check release env.properties: %w", err)
 	} else {
 		releaseProps = cloneProperties(environment)
+		releaseProps.Delete(trackerAutoLaunchSetting)
 		if GetTrackerConnectionEnabled() {
 			releaseProps.Delete(trackerConnectionKeyEnv)
 		} else {

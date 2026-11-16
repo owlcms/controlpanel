@@ -5,7 +5,60 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"controlpanel/tracker"
 )
+
+func TestAutomaticTrackerLaunchInheritance(t *testing.T) {
+	dir := t.TempDir()
+	previousDir := GetInstallDir()
+	SetInstallDir(dir)
+	t.Cleanup(func() { SetInstallDir(previousDir) })
+
+	if err := SaveProperty(trackerAutoLaunchSetting, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureReleaseEnvFromParent("65.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := TrackerAutoLaunchForRelease("65.0.0"); err != nil || !enabled {
+		t.Fatalf("new release should inherit automatic launch: enabled=%v err=%v", enabled, err)
+	}
+	if err := SavePropertyForRelease("65.0.0", trackerAutoLaunchSetting, "false"); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := TrackerAutoLaunchForRelease("65.0.0"); err != nil || enabled {
+		t.Fatalf("release override should disable automatic launch: enabled=%v err=%v", enabled, err)
+	}
+	if err := DeletePropertyForRelease("65.0.0", trackerAutoLaunchSetting); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := TrackerAutoLaunchForRelease("65.0.0"); err != nil || !enabled {
+		t.Fatalf("deleting override should restore default: enabled=%v err=%v", enabled, err)
+	}
+	if err := SaveProperty(trackerAutoLaunchSetting, "false"); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := TrackerAutoLaunchForRelease("65.0.0"); err != nil || enabled {
+		t.Fatalf("release should follow changed default: enabled=%v err=%v", enabled, err)
+	}
+}
+
+func TestAutomaticTrackerConnectionOverridesManualEnvironment(t *testing.T) {
+	params := &owlcmsLaunchParams{Env: []string{
+		"OWLCMS_VIDEODATA=wss://remote.example:443/ws",
+		"OWLCMS_VIDEODATAKEY=old-key",
+	}}
+	applyAutomaticTrackerConnection(params, &tracker.LocalConnection{Port: "18123", Key: ""})
+	if got := strings.Join(params.Env, "\n"); got != "OWLCMS_VIDEODATA=ws://localhost:18123/ws" {
+		t.Fatalf("automatic connection without a key must replace the URL and send no key: %q", got)
+	}
+	params.Env = []string{"OWLCMS_VIDEODATA=wss://remote.example:443/ws"}
+	applyAutomaticTrackerConnection(params, &tracker.LocalConnection{Port: "18123", Key: "tracker-key"})
+	if got := strings.Join(params.Env, "\n"); got != "OWLCMS_VIDEODATA=ws://localhost:18123/ws\nOWLCMS_VIDEODATAKEY=tracker-key" {
+		t.Fatalf("automatic connection must send the Tracker's key: %q", got)
+	}
+}
 
 func TestGetMdnsHostNameDefaultsAndPreservesDisableValue(t *testing.T) {
 	installDir := t.TempDir()

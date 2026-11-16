@@ -11,6 +11,8 @@ The control panel is installed once. It will automatically download the correct 
 
 ### 3.10.0
 
+- New "tandem" option to automatically start/stop the latest locally installed tracker when OWLCMS is started/stopped
+
 - When running on terminal (controlpanel --repl), typing "owlcms" or "tracker" switches to that mode.
 
 - Added options to select a repository containing checkpoint .json files; if selected, OWLCMS 69 and later versions show the option to start from there.

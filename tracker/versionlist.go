@@ -388,7 +388,7 @@ func NewGreenButton(label string, tapped func()) *widget.Button {
 func createLaunchButton(w fyne.Window, version string, stopBtn *widget.Button, buttonContainer *fyne.Container) {
 	launchButton := NewGreenButton("Launch", nil)
 	launchButton.OnTapped = func() {
-		if currentProcess != nil {
+		if currentProcess != nil || automaticStarting.Load() {
 			dialog.ShowError(fmt.Errorf("owlcms-tracker is already running"), w)
 			return
 		}

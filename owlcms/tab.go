@@ -502,6 +502,21 @@ func onTrackerURLChanged(text string, portEntry, keyEntry *widget.Entry) {
 	syncTrackerKeyPlaceholder(text, keyEntry)
 }
 
+func setTrackerControlEnabled(object fyne.CanvasObject, enabled bool) {
+	if c, ok := object.(*fyne.Container); ok {
+		for _, child := range c.Objects {
+			setTrackerControlEnabled(child, enabled)
+		}
+	}
+	if control, ok := object.(fyne.Disableable); ok {
+		if enabled {
+			control.Enable()
+		} else {
+			control.Disable()
+		}
+	}
+}
+
 func showTrackerConnectionDialog(w fyne.Window) {
 	trackerURL, trackerPort, enabled := GetTrackerConnectionSettings()
 	urlEntry := widget.NewEntry()
@@ -516,10 +531,16 @@ func showTrackerConnectionDialog(w fyne.Window) {
 	syncTrackerKeyPlaceholder(trackerURL, keyEntry)
 	enabledCheck := widget.NewCheck("Use the following connection parameters on new OWLCMS versions", nil)
 	enabledCheck.SetChecked(enabled)
+	autoCheck := widget.NewCheck("Launch the latest locally installed tracker and connect when starting OWLCMS", nil)
+	autoCheck.SetChecked(defaultTrackerAutoLaunch())
 	statusLabel := widget.NewLabel("")
 	statusLabel.Wrapping = fyne.TextWrapWord
 
 	updateStatusText := func() {
+		if autoCheck.Checked {
+			statusLabel.SetText("Graphical launches use the latest installed Tracker's port and shared key. Tracker stops when OWLCMS stops.")
+			return
+		}
 		trackerURL := effectiveTrackerURL(urlEntry.Text)
 		suffix := trackerPortSuffix(trackerURL, effectiveTrackerPort(urlEntry.Text, portEntry.Text))
 		keyText := "without a key"
@@ -538,6 +559,13 @@ func showTrackerConnectionDialog(w fyne.Window) {
 	enabledCheck.OnChanged = func(_ bool) {
 		updateStatusText()
 	}
+	autoCheck.OnChanged = func(automatic bool) {
+		setTrackerControlEnabled(enabledCheck, !automatic)
+		setTrackerControlEnabled(urlEntry, !automatic)
+		setTrackerControlEnabled(portEntry, !automatic && !isSecureTrackerURL(urlEntry.Text))
+		setTrackerControlEnabled(keyRow, !automatic)
+		updateStatusText()
+	}
 	urlEntry.OnChanged = func(text string) {
 		onTrackerURLChanged(text, portEntry, keyEntry)
 		updateStatusText()
@@ -545,9 +573,10 @@ func showTrackerConnectionDialog(w fyne.Window) {
 	portEntry.OnChanged = func(_ string) {
 		updateStatusText()
 	}
-	updateStatusText()
+	autoCheck.OnChanged(autoCheck.Checked)
 
 	content := container.NewVBox(
+		autoCheck,
 		enabledCheck,
 		widget.NewForm(
 			widget.NewFormItem("URL", container.NewGridWrap(fyne.NewSize(300, urlEntry.MinSize().Height), urlEntry)),
@@ -565,6 +594,14 @@ func showTrackerConnectionDialog(w fyne.Window) {
 		content,
 		func(ok bool) {
 			if !ok {
+				return
+			}
+			if autoCheck.Checked {
+				if err := SaveProperty(trackerAutoLaunchSetting, "true"); err != nil {
+					dialog.ShowError(fmt.Errorf("failed to save automatic Tracker launch: %w", err), w)
+					return
+				}
+				dialog.ShowInformation("Default Tracker Connection", "Automatic Tracker launch enabled for graphical OWLCMS launches.", w)
 				return
 			}
 			baseURL := effectiveTrackerURL(urlEntry.Text)
@@ -594,6 +631,12 @@ func showTrackerConnectionDialog(w fyne.Window) {
 				dialog.ShowError(fmt.Errorf("failed to save tracker shared key: %w", err), w)
 				return
 			}
+			if defaultTrackerAutoLaunch() {
+				if err := SaveProperty(trackerAutoLaunchSetting, "false"); err != nil {
+					dialog.ShowError(fmt.Errorf("failed to save automatic Tracker launch: %w", err), w)
+					return
+				}
+			}
 			dialog.ShowInformation("Default Tracker Connection", "Default Tracker Connection updated. Restart OWLCMS to apply the change.", w)
 		},
 		w,
@@ -606,7 +649,20 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 		dialog.ShowInformation("No Tracker Installed", "Install a Tracker version first (on the Tracker tab), then configure the connection.", w)
 		return
 	}
-
+	if err := InitEnv(); err != nil {
+		dialog.ShowError(fmt.Errorf("failed to load Tracker connection settings: %w", err), w)
+		return
+	}
+	autoDefault := defaultTrackerAutoLaunch()
+	releaseProps, err := loadReleaseProperties(version)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("failed to load Tracker connection settings: %w", err), w)
+		return
+	}
+	autoValue, hasAutoOverride := "", false
+	if releaseProps != nil {
+		autoValue, hasAutoOverride = releaseProps.Get(trackerAutoLaunchSetting)
+	}
 	initialURL, initialPort, _ := GetTrackerConnectionSettings()
 	if savedURL, savedPort, ok := trackerConnectionSettings(GetTrackerConnectionURLForRelease(version)); ok {
 		initialURL, initialPort = savedURL, savedPort
@@ -623,10 +679,18 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 	keyOverride := shared.NewSharedKeyOverride(ownKey, hasOwnKey, ownKeyErr, defaultKey, "Tracker connection of OWLCMS "+version)
 	keyEntry := keyOverride.Entry
 	enabledCheck := widget.NewCheck("Enable Tracker connection", nil)
+	autoCheck := widget.NewCheck("Launch the latest locally installed tracker and connect when starting OWLCMS", nil)
+	useDefaultAuto := widget.NewCheck("Use default automatic launch setting", nil)
+	useDefaultAuto.SetChecked(!hasAutoOverride)
+	autoCheck.SetChecked((!hasAutoOverride && autoDefault) || (hasAutoOverride && trackerConnectionEnabled(autoValue)))
 	statusLabel := widget.NewLabel("")
 	statusLabel.Wrapping = fyne.TextWrapWord
 
 	updateStatusText := func() {
+		if autoCheck.Checked {
+			statusLabel.SetText(fmt.Sprintf("Graphical launches of version %s use the latest installed Tracker's port and shared key. Tracker stops when OWLCMS stops.", version))
+			return
+		}
 		if enabledCheck.Checked {
 			trackerURL := effectiveTrackerURL(urlEntry.Text)
 			statusLabel.SetText(fmt.Sprintf("Version %s will connect to Tracker at %s%s.", version, trackerURL, trackerPortSuffix(trackerURL, effectiveTrackerPort(urlEntry.Text, portEntry.Text))))
@@ -637,6 +701,22 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 	enabledCheck.OnChanged = func(_ bool) {
 		updateStatusText()
 	}
+	autoCheck.OnChanged = func(automatic bool) {
+		setTrackerControlEnabled(enabledCheck, !automatic)
+		setTrackerControlEnabled(urlEntry, !automatic)
+		setTrackerControlEnabled(portEntry, !automatic && !isSecureTrackerURL(urlEntry.Text))
+		setTrackerControlEnabled(keyOverride.Row, !automatic)
+		updateStatusText()
+	}
+	useDefaultAuto.OnChanged = func(useDefault bool) {
+		if useDefault {
+			autoCheck.SetChecked(autoDefault)
+			autoCheck.Disable()
+		} else {
+			autoCheck.Enable()
+		}
+		autoCheck.OnChanged(autoCheck.Checked)
+	}
 	urlEntry.OnChanged = func(text string) {
 		// the key field shows (default key)/(empty) placeholders, so it gets no URL-based hint
 		onTrackerURLChanged(text, portEntry, nil)
@@ -646,9 +726,11 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 		updateStatusText()
 	}
 	enabledCheck.SetChecked(GetTrackerConnectionPortForRelease(version) != "")
-	updateStatusText()
+	useDefaultAuto.OnChanged(useDefaultAuto.Checked)
 
 	content := container.NewVBox(
+		useDefaultAuto,
+		autoCheck,
 		enabledCheck,
 		widget.NewForm(
 			widget.NewFormItem("URL", container.NewGridWrap(fyne.NewSize(300, urlEntry.MinSize().Height), urlEntry)),
@@ -666,6 +748,20 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 		content,
 		func(ok bool) {
 			if !ok {
+				return
+			}
+			saveAuto := func() error {
+				if useDefaultAuto.Checked {
+					return DeletePropertyForRelease(version, trackerAutoLaunchSetting)
+				}
+				return SavePropertyForRelease(version, trackerAutoLaunchSetting, strconv.FormatBool(autoCheck.Checked))
+			}
+			if autoCheck.Checked {
+				if err := saveAuto(); err != nil {
+					dialog.ShowError(fmt.Errorf("failed to save automatic Tracker launch: %w", err), w)
+					return
+				}
+				dialog.ShowInformation("Tracker Connection", fmt.Sprintf("Automatic Tracker launch enabled for graphical launches of version %s.", version), w)
 				return
 			}
 			saveKey := func() bool {
@@ -703,6 +799,10 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 				if !saveKey() {
 					return
 				}
+				if err := saveAuto(); err != nil {
+					dialog.ShowError(fmt.Errorf("failed to save automatic Tracker launch: %w", err), w)
+					return
+				}
 				dialog.ShowInformation("Tracker Connection", fmt.Sprintf("Tracker connection enabled for version %s%s. Restart OWLCMS for that version to apply the change.", version, trackerPortSuffix(baseURL, port)), w)
 				return
 			}
@@ -712,6 +812,10 @@ func showTrackerConnectionDialogForVersion(w fyne.Window, version string) {
 				return
 			}
 			if !saveKey() {
+				return
+			}
+			if err := saveAuto(); err != nil {
+				dialog.ShowError(fmt.Errorf("failed to save automatic Tracker launch: %w", err), w)
 				return
 			}
 			dialog.ShowInformation("Tracker Connection", fmt.Sprintf("Tracker connection disabled for version %s. Restart OWLCMS for that version to apply the change.", version), w)
@@ -1007,8 +1111,14 @@ func configureTokenUI() {
 	tokenRow.Show()
 }
 
-func configureTrackerConnectionUI(version string) {
-	connectionURL := GetTrackerConnectionURLForRelease(version)
+func configureTrackerConnectionUI(version string, actualURL ...string) {
+	connectionURL := ""
+	if len(actualURL) > 0 {
+		connectionURL = actualURL[0]
+	}
+	if connectionURL == "" {
+		connectionURL = GetTrackerConnectionURLForRelease(version)
+	}
 	if connectionURL == "" {
 		trackerConnectionRow.Hide()
 		return

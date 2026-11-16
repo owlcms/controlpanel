@@ -16,6 +16,7 @@ import (
 
 	"controlpanel/owlcms/javacheck"
 	"controlpanel/shared"
+	"controlpanel/tracker"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -172,6 +173,8 @@ type owlcmsLaunchParams struct {
 	Env        []string
 	// TrackerKeyWarning is set when the saved Tracker shared key could not be used.
 	TrackerKeyWarning string
+	AutoTracker       *tracker.LocalConnection
+	TrackerURL        string
 }
 
 const daemonMainClass = "app.owlcms.MainWrapper"
@@ -210,6 +213,7 @@ func applyOwlcmsPropertiesToEnv(env []string, props *properties.Properties) []st
 		trackerConnectionURLSetting:        {},
 		trackerConnectionPortSetting:       {},
 		trackerConnectionDefaultEnabledKey: {},
+		trackerAutoLaunchSetting:           {},
 		trackerConnectionKeyEnv:            {},
 		checkpointFolderSetting:            {},
 	}
@@ -257,7 +261,7 @@ func logEffectiveOwlcmsEnvironment(version string, props *properties.Properties)
 // prepareOwlcmsLaunch resolves paths, verifies the jar exists, finds Java,
 // loads the release environment, and builds the process env slice.
 // Callers must ensure InitEnv() has been called before this.
-func prepareOwlcmsLaunch(version string, embeddedMQTTOverride *bool) (*owlcmsLaunchParams, error) {
+func prepareOwlcmsLaunch(version string, embeddedMQTTOverride *bool, automaticTracker bool) (*owlcmsLaunchParams, error) {
 	if _, err := os.Stat(installDir); os.IsNotExist(err) {
 		if err := shared.EnsureDir0755(installDir); err != nil {
 			return nil, fmt.Errorf("creating owlcms directory: %w", err)
@@ -297,7 +301,10 @@ func prepareOwlcmsLaunch(version string, embeddedMQTTOverride *bool) (*owlcmsLau
 	}
 	logEffectiveOwlcmsEnvironment(version, effectiveEnv)
 	env = applyOwlcmsPropertiesToEnv(env, mergedEnv)
-	env, trackerKeyWarning := applyTrackerConnectionKeyToEnv(env, mergedEnv, version)
+	trackerKeyWarning := ""
+	if !automaticTracker {
+		env, trackerKeyWarning = applyTrackerConnectionKeyToEnv(env, mergedEnv, version)
+	}
 	if embeddedMQTTOverride != nil {
 		value := "false"
 		if *embeddedMQTTOverride {
@@ -386,7 +393,7 @@ func GetLastRunVersion() string {
 func LaunchDaemon(version string) error {
 	log.Printf("LaunchDaemon: starting OWLCMS %s headlessly", version)
 
-	params, err := prepareOwlcmsLaunch(version, nil)
+	params, err := prepareOwlcmsLaunch(version, nil, false)
 	if err != nil {
 		return err
 	}
@@ -411,7 +418,7 @@ func LaunchDaemon(version string) error {
 // LaunchForeground starts OWLCMS from the command line and blocks until it exits.
 func LaunchForeground(version string) error {
 	log.Printf("LaunchForeground: starting OWLCMS %s", version)
-	params, err := prepareOwlcmsLaunch(version, nil)
+	params, err := prepareOwlcmsLaunch(version, nil, false)
 	if err != nil {
 		return err
 	}
@@ -582,7 +589,13 @@ func launchOwlcms(version string, launchButton, stopBtn *widget.Button) error {
 func launchOwlcmsLoading(version, loadJSON string, launchButton, stopBtn *widget.Button) error {
 	currentVersion = version
 
-	params, err := prepareOwlcmsLaunch(version, nil)
+	automatic, err := TrackerAutoLaunchForRelease(version)
+	if err != nil {
+		goBackToMainScreen()
+		releaseJavaLock()
+		return fmt.Errorf("load automatic Tracker setting: %w", err)
+	}
+	params, err := prepareOwlcmsLaunch(version, nil, automatic)
 	if err != nil {
 		goBackToMainScreen()
 		releaseJavaLock()
@@ -592,8 +605,31 @@ func launchOwlcmsLoading(version, loadJSON string, launchButton, stopBtn *widget
 		log.Printf("   %s=%s (launch from checkpoint)", loadJSONEnv, loadJSON)
 		params.Env = setEnvValue(params.Env, loadJSONEnv, loadJSON)
 	}
-	if params.TrackerKeyWarning != "" {
+	if params.TrackerKeyWarning != "" && !automatic {
 		dialog.ShowInformation("Tracker Shared Key", params.TrackerKeyWarning, mainWindow)
+	}
+	start := func() {
+		if !automatic {
+			continueOwlcmsLaunch(version, params, launchButton, stopBtn)
+			return
+		}
+		launchButton.Disable()
+		statusLabel.SetText("Starting the latest installed Tracker...")
+		statusLabel.Show()
+		go func() {
+			connection, err := tracker.StartLatestForOwlcms()
+			fyne.Do(func() {
+				launchButton.Enable()
+				if err != nil {
+					releaseJavaLock()
+					goBackToMainScreen()
+					dialog.ShowError(fmt.Errorf("automatic Tracker launch: %w", err), mainWindow)
+					return
+				}
+				applyAutomaticTrackerConnection(params, connection)
+				continueOwlcmsLaunch(version, params, launchButton, stopBtn)
+			})
+		}()
 	}
 
 	targetPort := params.TargetPort
@@ -606,13 +642,36 @@ func launchOwlcmsLoading(version, loadJSON string, launchButton, stopBtn *widget
 				return
 			}
 			log.Printf("Port %s successfully freed", targetPort)
-			continueOwlcmsLaunch(version, params, launchButton, stopBtn)
+			start()
 		})
 		return nil
 	}
 
-	continueOwlcmsLaunch(version, params, launchButton, stopBtn)
+	start()
 	return nil
+}
+
+func stopAutomaticTracker(params *owlcmsLaunchParams) {
+	if params.AutoTracker == nil {
+		return
+	}
+	if err := params.AutoTracker.Stop(); err != nil {
+		log.Printf("Failed to stop automatically launched Tracker: %v", err)
+		fyne.Do(func() {
+			dialog.ShowError(fmt.Errorf("failed to stop Tracker after OWLCMS stopped: %w", err), mainWindow)
+		})
+	}
+}
+
+func applyAutomaticTrackerConnection(params *owlcmsLaunchParams, connection *tracker.LocalConnection) {
+	params.AutoTracker = connection
+	params.TrackerURL = trackerConnectionURL(defaultTrackerConnectionURL, connection.Port)
+	params.Env = setEnvValue(params.Env, trackerConnectionEnv, params.TrackerURL)
+	if connection.Key == "" {
+		params.Env = removeEnvKey(params.Env, trackerConnectionKeyEnv)
+	} else {
+		params.Env = setEnvValue(params.Env, trackerConnectionKeyEnv, connection.Key)
+	}
 }
 
 func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButton, stopBtn *widget.Button) {
@@ -626,12 +685,14 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 
 	originalDir, err := os.Getwd()
 	if err != nil {
+		go stopAutomaticTracker(params)
 		dialog.ShowError(fmt.Errorf("getting current directory: %w", err), mainWindow)
 		goBackToMainScreen()
 		return
 	}
 
 	if err := os.Chdir(params.VersionDir); err != nil {
+		go stopAutomaticTracker(params)
 		launchButton.Show()
 		dialog.ShowError(fmt.Errorf("changing to version directory: %w", err), mainWindow)
 		return
@@ -658,6 +719,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 
 		log.Printf("Starting OWLCMS %s with command: %v\n", version, cmd.Args)
 		if err := cmd.Start(); err != nil {
+			go stopAutomaticTracker(params)
 			statusLabel.SetText(fmt.Sprintf("Failed to start OWLCMS %s", version))
 			releaseJavaLock()
 			launchButton.Show()
@@ -688,7 +750,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 		}
 		appDirLink.Show()
 		configureTokenUI()
-		configureTrackerConnectionUI(version)
+		configureTrackerConnectionUI(version, params.TrackerURL)
 		configureTailLogLink(version, appDir)
 
 		// Start monitoring for startup.log (when supported by the OWLCMS version)
@@ -704,6 +766,19 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 
 		go func(retryCount int, pid int) {
 			if err := <-monitorChan; err != nil {
+				if params.AutoTracker != nil && shared.IsProcessRunning(pid) {
+					log.Printf("OWLCMS %d did not become ready; waiting for it to exit before stopping Tracker: %v", pid, err)
+					fyne.Do(func() {
+						statusLabel.SetText(fmt.Sprintf("OWLCMS %d did not become ready; it is still running", pid))
+					})
+					<-done
+					stopAutomaticTracker(params)
+					restoreOwlcmsStoppedUI(stopBtn, launchButton, fmt.Sprintf("OWLCMS %s stopped", version))
+					return
+				}
+				if !shared.IsProcessRunning(pid) {
+					stopAutomaticTracker(params)
+				}
 				if killedByUs || stopInProgress.Load() {
 					log.Printf("OWLCMS process %d stopped before readiness during intentional stop: %v", pid, err)
 					restoreOwlcmsStoppedUI(stopBtn, launchButton, fmt.Sprintf("OWLCMS %s (PID: %d) was stopped before becoming ready", version, pid))
@@ -741,7 +816,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 				}
 				appDirLink.Show()
 				configureTokenUI()
-				configureTrackerConnectionUI(version)
+				configureTrackerConnectionUI(version, params.TrackerURL)
 				configureTailLogLink(version, appDir)
 			})
 
@@ -801,6 +876,7 @@ func continueOwlcmsLaunch(version string, params *owlcmsLaunchParams, launchButt
 			}
 
 			currentProcess = nil
+			stopAutomaticTracker(params)
 			killedByUs = false
 			stopInProgress.Store(false)
 			clearRuntimeState()
