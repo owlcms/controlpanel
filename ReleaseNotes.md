@@ -9,6 +9,11 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
+### 3.10.1
+
+- Raspberry Pi builds now support older Bookworm operating system installs
+  - From this release on, an OS-specific version will be fetched if available (i.e. there will be a Trixie release to benefit from newer libraries)
+
 ### 3.10.0
 
 - New "tandem" option to automatically start/stop the latest locally installed tracker when OWLCMS is started/stopped

@@ -16,17 +16,17 @@ on:
         description: 'Build the macOS DMGs'
         required: false
         type: boolean
-        default: false
+        default: true
       build_windows:
         description: 'Build the Windows installer'
         required: false
         type: boolean
-        default: false
+        default: true
       build_linux:
         description: 'Build the Linux Intel package'
         required: false
         type: boolean
-        default: false
+        default: true
       build_raspberry:
         description: 'Build the Raspberry Pi Trixie package (debian:trixie container)'
         required: false
