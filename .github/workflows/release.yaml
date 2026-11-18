@@ -595,6 +595,9 @@ jobs:
 
     - name: Build native Linux arm64 package
       if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      env:
+        # git refuses the workspace in the container; the version comes from shared/version.go, not VCS stamping
+        GOFLAGS: -buildvcs=false
       run: fyne package --os linux --icon Icon.png --name owlcms
 
     - name: Normalize Linux package paths
