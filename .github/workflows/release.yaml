@@ -14,10 +14,13 @@ on:
         default: true
 
 env:
-  BUILD_MAC: true
-  BUILD_WINDOWS: true
-  BUILD_RASPBERRY: true
-  BUILD_LINUX: true
+  # To publish only the Bookworm Raspberry Pi package, set every flag below to false except
+  # BUILD_RASPBERRY_BOOKWORM. If the release for the tag already exists, the package is added to it.
+  BUILD_MAC: false
+  BUILD_WINDOWS: false
+  BUILD_RASPBERRY: false
+  BUILD_RASPBERRY_BOOKWORM: true
+  BUILD_LINUX: false
 
 jobs:
   build_mac_amd64:
@@ -540,6 +543,131 @@ jobs:
         name: build_linux_arm64_artifacts
         path: artifacts/*
 
+  # Same package as build_linux_arm64, but compiled inside Debian 12 (Bookworm) so the binary
+  # only requires the glibc available on Raspberry Pi OS Bookworm (2.36).
+  build_linux_arm64_bookworm:
+    runs-on: ubuntu-24.04-arm
+    container: debian:bookworm
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Install build dependencies
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      run: |
+        apt-get update
+        apt-get install -y git ca-certificates curl xz-utils build-essential pkg-config \
+          libgl1-mesa-dev libegl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev ruby-full
+        gem install --no-document fpm
+
+    - name: Checkout code
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25.5'
+
+    - name: Install fyne
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      run: |
+        go install fyne.io/fyne/v2/cmd/fyne@v2.8.0
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+        echo "$(gem environment gemdir)/bin" >> $GITHUB_PATH
+
+    - name: Extract tag
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      run: |
+        echo "TAG=${{ inputs.tag }}" >> $GITHUB_ENV
+        version="${{ inputs.tag }}"
+        version="${version#v}"
+        version="${version/-alpha/~alpha}"
+        version="${version/-beta/~beta}"
+        version="${version/-rc/~rc}"
+        echo "DEB_TAG=${version}" >> $GITHUB_ENV
+
+    - name: Substitute tag in config.go
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      run: sed -i "s/_TAG_/${TAG}/g" shared/version.go
+
+    - name: Build native Linux arm64 package
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      run: fyne package --os linux --icon Icon.png --name owlcms
+
+    - name: Normalize Linux package paths
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      shell: bash
+      run: |
+        mkdir -p /tmp/fix-arm64
+        cd /tmp/fix-arm64
+        tar -xf "${GITHUB_WORKSPACE}/owlcms.tar.xz" --strip-components=1
+        mkdir -p usr/share/pixmaps usr/share/applications
+        if [ -f usr/local/share/pixmaps/owlcms.png ]; then
+          mv usr/local/share/pixmaps/owlcms.png usr/share/pixmaps/
+        fi
+        if [ -f usr/local/share/applications/owlcms.desktop ]; then
+          mv usr/local/share/applications/owlcms.desktop usr/share/applications/
+        fi
+        rm -rf usr/local/share/pixmaps usr/local/share/applications
+        for bindir in usr/local/bin usr/bin; do
+          primary=""
+          for candidate in owlcms-launcher owlcms controlpanel; do
+            if [ -x "$bindir/$candidate" ] && [ ! -L "$bindir/$candidate" ]; then
+              primary="$candidate"
+              break
+            fi
+          done
+          if [ -n "$primary" ]; then
+            if [ "$primary" != "owlcms" ]; then
+              ln -sfn "$primary" "$bindir/owlcms"
+            fi
+            if [ "$primary" != "controlpanel" ]; then
+              ln -sfn "$primary" "$bindir/controlpanel"
+            fi
+          fi
+        done
+        rm -f Makefile
+        tar -cJf "${GITHUB_WORKSPACE}/owlcms.tar.xz" .
+
+    - name: Check required glibc version
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      shell: bash
+      run: |
+        max=$(find /tmp/fix-arm64 -type f -perm -u+x -print0 \
+          | xargs -0 -r objdump -T 2>/dev/null \
+          | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
+        if [ -z "$max" ]; then
+          echo "No glibc-versioned symbols found"
+          exit 1
+        fi
+        echo "Highest required glibc symbol: $max"
+        if [ "$(printf '%s\n' "$max" GLIBC_2.36 | sort -V | tail -1)" != "GLIBC_2.36" ]; then
+          echo "Binary requires $max, newer than Bookworm's GLIBC_2.36"
+          exit 1
+        fi
+        echo "GLIBC_MIN=${max#GLIBC_}" >> $GITHUB_ENV
+
+    - name: Create Raspberry Pi Bookworm DEB package
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      run: |
+        fpm -s tar -t deb -n owlcms-launcher -v "${DEB_TAG}" -a arm64 --prefix / \
+          --depends "libc6 (>= ${GLIBC_MIN})" \
+          --after-install ./dist/after_install_raspberry_pi.sh \
+          --after-remove ./dist/after_remove_raspberry_pi.sh \
+          ./owlcms.tar.xz
+        mkdir -p artifacts
+        mv "owlcms-launcher_${DEB_TAG}_arm64.deb" artifacts/Raspberry_Pi_arm64_Bookworm_Control_Panel_Installer.deb
+
+    - name: Upload Linux arm64 Bookworm artifact
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      uses: actions/upload-artifact@v6
+      with:
+        name: build_linux_arm64_bookworm_artifacts
+        path: artifacts/*
+
   package_windows:
     runs-on: windows-latest
     needs: build_windows_crosscompile
@@ -671,7 +799,7 @@ jobs:
 
   create_release:
     runs-on: ubuntu-latest
-    needs: [build_mac_amd64, build_mac_arm64, build_linux_amd64, build_linux_arm64, package_windows]
+    needs: [build_mac_amd64, build_mac_arm64, build_linux_amd64, build_linux_arm64, build_linux_arm64_bookworm, package_windows]
 
     steps:
     - name: Checkout code
@@ -725,6 +853,13 @@ jobs:
         name: build_linux_arm64_artifacts
         path: ./dist
 
+    - name: Download Linux arm64 Bookworm artifacts
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      uses: actions/download-artifact@v7
+      with:
+        name: build_linux_arm64_bookworm_artifacts
+        path: ./dist
+
     - name: Download package_windows_artifacts
       if: ${{ env.BUILD_WINDOWS == 'true' }}
       uses: actions/download-artifact@v7
@@ -737,7 +872,9 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       shell: bash
       run: |
-        if [[ "${TAG}" == *"-"* ]]; then
+        if gh release view "${TAG}" >/dev/null 2>&1; then
+          echo "Release ${TAG} already exists; adding assets to it"
+        elif [[ "${TAG}" == *"-"* ]]; then
           gh release create ${{ env.TAG }} \
             --title "owlcms Control Panel ${{ env.TAG }}" \
             --notes-file ./dist/ReleaseNotes.md \
@@ -863,6 +1000,13 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         gh release upload ${{ env.TAG }} dist/Raspberry_Pi_arm64_Control_Panel_Installer.deb
+
+    - name: Release Raspberry Pi Bookworm DEB package
+      if: ${{ env.BUILD_RASPBERRY_BOOKWORM == 'true' }}
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release upload --clobber ${{ env.TAG }} dist/Raspberry_Pi_arm64_Bookworm_Control_Panel_Installer.deb
 
     - name: Release Linux Intel DEB package
       if: ${{ env.BUILD_LINUX == 'true' }}
