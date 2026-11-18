@@ -40,23 +40,46 @@ func ControlPanelInstallerFor(goos, goarch string) (ControlPanelInstaller, bool)
 	return ControlPanelInstaller{}, false
 }
 
+// raspberryPiInstallerFor returns the ARM64 Debian installer variant matching the running system:
+// Bookworm (or older) Debian-family systems get the Bookworm package, newer ones the Trixie package.
+func raspberryPiInstallerFor(legacyDebian bool) ControlPanelInstaller {
+	if legacyDebian {
+		return ControlPanelInstaller{"Raspberry_Pi_arm64_Bookworm_Control_Panel_Installer.deb", "Raspberry Pi OS Bookworm Installer (.deb)"}
+	}
+	return ControlPanelInstaller{"Raspberry_Pi_arm64_Trixie_Control_Panel_Installer.deb", "Raspberry Pi OS Trixie Installer (.deb)"}
+}
+
 // ControlPanelInstallerLink returns the label and GitHub release download URL of the installer
-// for goos/goarch in the release tag. When the release does not publish that installer,
-// it returns the GitHub release page instead and found is false.
-func ControlPanelInstallerLink(tag string, assets []ReleaseAsset, goos, goarch string) (label string, link string, found bool) {
+// for goos/goarch in the release tag. On linux/arm64, legacyDebian selects the Bookworm or Trixie
+// package; if the release does not publish it (older releases), the unsuffixed installer is used.
+// When the release does not publish the installer, it returns the GitHub release page instead
+// and found is false.
+func ControlPanelInstallerLink(tag string, assets []ReleaseAsset, goos, goarch string, legacyDebian bool) (label string, link string, found bool) {
 	releasePage := fmt.Sprintf("%s/tag/%s", ControlPanelReleasesURL, url.PathEscape(tag))
 	installer, ok := ControlPanelInstallerFor(goos, goarch)
 	if !ok {
 		return "Download the Installer", releasePage, false
 	}
-	for _, asset := range assets {
-		if asset.Name == installer.AssetName {
-			link = asset.BrowserDownloadURL
-			if link == "" {
-				link = fmt.Sprintf("%s/download/%s/%s", ControlPanelReleasesURL, url.PathEscape(tag), url.PathEscape(asset.Name))
-			}
-			return installer.Label, link, true
+	if goos == "linux" && goarch == "arm64" {
+		variant := raspberryPiInstallerFor(legacyDebian)
+		if link, found := releaseAssetLink(tag, assets, variant.AssetName); found {
+			return variant.Label, link, true
 		}
 	}
+	if link, found := releaseAssetLink(tag, assets, installer.AssetName); found {
+		return installer.Label, link, true
+	}
 	return installer.Label, releasePage, false
+}
+
+func releaseAssetLink(tag string, assets []ReleaseAsset, assetName string) (string, bool) {
+	for _, asset := range assets {
+		if asset.Name == assetName {
+			if asset.BrowserDownloadURL != "" {
+				return asset.BrowserDownloadURL, true
+			}
+			return fmt.Sprintf("%s/download/%s/%s", ControlPanelReleasesURL, url.PathEscape(tag), url.PathEscape(asset.Name)), true
+		}
+	}
+	return "", false
 }

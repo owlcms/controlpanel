@@ -1141,7 +1141,7 @@ func CheckForUpdates(win fyne.Window, showConfirmation bool) {
 			return
 		}
 		releaseNotesLink := widget.NewHyperlink("Release Notes", parsedURL)
-		installerLabel, installerURL, found := shared.ControlPanelInstallerLink(newerRelease.TagName, newerRelease.Assets, shared.GetGoos(), shared.GetGoarch())
+		installerLabel, installerURL, found := shared.ControlPanelInstallerLink(newerRelease.TagName, newerRelease.Assets, shared.GetGoos(), shared.GetGoarch(), shared.IsLegacyDebian())
 		if found {
 			installerLabel = "Download the " + installerLabel
 		}
@@ -1169,7 +1169,7 @@ func CheckForUpdates(win fyne.Window, showConfirmation bool) {
 				releasesLink,
 			)
 			if latestRelease != nil {
-				installerLabel, installerURL, _ := shared.ControlPanelInstallerLink(latestRelease.TagName, latestRelease.Assets, shared.GetGoos(), shared.GetGoarch())
+				installerLabel, installerURL, _ := shared.ControlPanelInstallerLink(latestRelease.TagName, latestRelease.Assets, shared.GetGoos(), shared.GetGoarch(), shared.IsLegacyDebian())
 				if parsedInstallerURL, err := url.Parse(installerURL); err == nil {
 					content.Add(widget.NewHyperlink(fmt.Sprintf("Latest %s - %s", installerLabel, latestRelease.TagName), parsedInstallerURL))
 				}
