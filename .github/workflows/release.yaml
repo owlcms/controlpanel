@@ -203,7 +203,7 @@ jobs:
 
   build_mac_arm64:
     if: ${{ inputs.build_mac }}
-    runs-on: macos-latest
+    runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CGO_CFLAGS: "-mmacosx-version-min=13.0"
