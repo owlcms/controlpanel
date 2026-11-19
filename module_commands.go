@@ -167,6 +167,11 @@ func executeModuleLaunch(cmd moduleCLICommand, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if cmd.Module == "owlcms" {
+		if err := ensureJavaForHeadlessLaunch(out); err != nil {
+			return err
+		}
+	}
 	if cmd.Port != "" {
 		if cmd.Module == "owlcms" {
 			if err := owlcms.SavePropertyForRelease(version, "OWLCMS_PORT", cmd.Port); err != nil {

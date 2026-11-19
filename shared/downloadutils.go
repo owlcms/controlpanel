@@ -4,9 +4,12 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,11 +25,29 @@ type ProgressCallback func(downloaded, total int64)
 func DownloadArchive(url, destPath string, progress ProgressCallback, cancel <-chan bool) error {
 	log.Printf("Attempting to download from URL: %s\n", url)
 
-	client := &http.Client{}
+	transport := &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		Proxy:                 http.ProxyFromEnvironment,
+		ForceAttemptHTTP2:     true,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+	client := &http.Client{Transport: transport, Timeout: 30 * time.Minute}
 
-	req, err := http.NewRequest("GET", url, nil)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
+	}
+	if cancel != nil {
+		go func() {
+			select {
+			case <-cancel:
+				stop()
+			case <-ctx.Done():
+			}
+		}()
 	}
 
 	// Call progress callback immediately to update UI before network request
@@ -64,6 +85,9 @@ func DownloadArchive(url, destPath string, progress ProgressCallback, cancel <-c
 
 	_, err = io.Copy(out, io.TeeReader(resp.Body, counter))
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return context.Canceled
+		}
 		return fmt.Errorf("failed to copy data: %w", err)
 	}
 

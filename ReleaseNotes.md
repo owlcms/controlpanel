@@ -9,6 +9,11 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
+
+### 3.10.2
+
+- Require an update Java version to a 25.0.5.1 as precaution.  From now on, a minimum release will be enforced.
+
 ### 3.10.1
 
 - Raspberry Pi builds now support older Bookworm operating system installs

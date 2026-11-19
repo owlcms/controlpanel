@@ -128,7 +128,7 @@ func executeREPLLine(line string, session *replSession, out io.Writer) (bool, er
 			session.module = command
 			return false, nil
 		}
-	case "exit", "quit", "context", "secret":
+	case "exit", "quit", "context", "secret", "java":
 	default:
 		if session.module != "" {
 			args = append([]string{session.module}, args...)
@@ -158,6 +158,8 @@ func executeREPLLine(line string, session *replSession, out io.Writer) (bool, er
 		return false, executeREPLModule(args[0], args[1:], out)
 	case "secret":
 		return false, executeREPLSecret(args[1:], out)
+	case "java":
+		return false, executeREPLJava(args[1:], out)
 	default:
 		return false, fmt.Errorf("unknown command %q; use help", args[0])
 	}
@@ -242,7 +244,9 @@ func writeREPLContext(out io.Writer) {
 }
 
 func writeREPLHelp(out io.Writer) {
-	fmt.Fprintln(out, "Commands: context, help, exit, quit")
+	fmt.Fprintln(out, "Commands: context, help, java, exit, quit")
+	fmt.Fprintln(out, "  java status                        show installed Java and required minimum")
+	fmt.Fprintln(out, "  java update                        install the latest Temurin 25")
 	fmt.Fprintln(out, "  secret encrypt <keyname> <value>   print the value encrypted with ~/.owlcms/<keyname> (enc:v1:...)")
 	fmt.Fprintln(out, "Type 'owlcms' or 'tracker' alone to make it the default module for the following commands.")
 	fmt.Fprintln(out, "Use 'owlcms help' for OWLCMS commands.")

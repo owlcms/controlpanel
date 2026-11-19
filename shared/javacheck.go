@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // TemurinRelease represents a GitHub release for Temurin
@@ -186,6 +188,10 @@ func FindLocalJavaForVersion(temurinVersion string, goosFunc func() string) (str
 // If version is empty, it returns the latest release of Temurin 25
 // Supports both "jdk-17" style (major only) and "jdk-17.0.15+6" (full version)
 func FindLatestTemurinRelease(version string, userAgent string) (string, error) {
+	return FindLatestTemurinReleaseContext(context.Background(), version, userAgent)
+}
+
+func FindLatestTemurinReleaseContext(ctx context.Context, version string, userAgent string) (string, error) {
 	// Extract major version to determine which repo to use
 	majorVersion := 25 // Default to 25
 	if version != "" {
@@ -211,7 +217,7 @@ func FindLatestTemurinRelease(version string, userAgent string) (string, error) 
 		apiURL = fmt.Sprintf("https://api.github.com/repos/adoptium/%s/releases/tags/%s", repoName, encodedVersion)
 	}
 
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -219,7 +225,7 @@ func FindLatestTemurinRelease(version string, userAgent string) (string, error) 
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	req.Header.Set("User-Agent", userAgent)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Failed to fetch latest release: %v", err)
@@ -245,7 +251,11 @@ func FindLatestTemurinRelease(version string, userAgent string) (string, error) 
 // GetTemurinDownloadURL returns the download URL for a specific Temurin version
 // goosFunc should return the OS string (windows, darwin, linux)
 func GetTemurinDownloadURL(temurinVersion string, goosFunc func() string, userAgent string) (string, error) {
-	url, err := FindTemurinDownloadURLFromRecentReleases(temurinVersion, goosFunc, userAgent, 10)
+	return GetTemurinDownloadURLContext(context.Background(), temurinVersion, goosFunc, userAgent)
+}
+
+func GetTemurinDownloadURLContext(ctx context.Context, temurinVersion string, goosFunc func() string, userAgent string) (string, error) {
+	url, err := FindTemurinDownloadURLFromRecentReleasesContext(ctx, temurinVersion, goosFunc, userAgent, 10)
 	if err != nil {
 		log.Printf("Failed to find download URL in recent releases: %v", err)
 		return "", err
@@ -256,6 +266,17 @@ func GetTemurinDownloadURL(temurinVersion string, goosFunc func() string, userAg
 // FindTemurinDownloadURLFromRecentReleases scans the most recent releases and returns
 // a matching JRE/JDK asset URL. It logs each asset name being inspected.
 func FindTemurinDownloadURLFromRecentReleases(temurinVersion string, goosFunc func() string, userAgent string, perPage int) (string, error) {
+	return FindTemurinDownloadURLFromRecentReleasesContext(
+		context.Background(), temurinVersion, goosFunc, userAgent, perPage)
+}
+
+func FindTemurinDownloadURLFromRecentReleasesContext(
+	ctx context.Context,
+	temurinVersion string,
+	goosFunc func() string,
+	userAgent string,
+	perPage int,
+) (string, error) {
 	// Extract major version to determine which repo to use
 	majorVersion := 25 // Default
 	if temurinVersion != "" {
@@ -270,14 +291,14 @@ func FindTemurinDownloadURLFromRecentReleases(temurinVersion string, goosFunc fu
 	}
 
 	listURL := fmt.Sprintf("https://api.github.com/repos/adoptium/%s/releases?per_page=%d&page=1", repoName, perPage)
-	req, err := http.NewRequest("GET", listURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", listURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	req.Header.Set("User-Agent", userAgent)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Failed to fetch releases list: %v", err)
@@ -301,6 +322,11 @@ func FindTemurinDownloadURLFromRecentReleases(temurinVersion string, goosFunc fu
 
 	for _, release := range releases {
 		if release.TagName == "" {
+			continue
+		}
+		majorOnly := temurinVersion == "" ||
+			strings.TrimPrefix(temurinVersion, "jdk-") == strconv.Itoa(majorVersion)
+		if !majorOnly && release.TagName != temurinVersion {
 			continue
 		}
 		log.Printf("Checking release tag: %s\n", release.TagName)

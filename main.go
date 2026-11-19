@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"image/color"
 	"io"
@@ -189,7 +190,15 @@ func main() {
 	log.Printf("Starting OWLCMS Control Panel %s", shared.GetLauncherVersion())
 
 	if replFound {
-		if err := runREPL(replInvocation, replSession{}, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		input := io.Reader(os.Stdin)
+		if replInvocation.interactive {
+			bufferedInput := bufio.NewReader(os.Stdin)
+			checkJavaAtHeadlessStartup(bufferedInput, true, os.Stdout, os.Stderr)
+			input = bufferedInput
+		} else {
+			checkJavaAtHeadlessStartup(nil, false, os.Stdout, os.Stderr)
+		}
+		if err := runREPL(replInvocation, replSession{}, input, os.Stdout, os.Stderr); err != nil {
 			log.Printf("ERROR: %v", err)
 			fmt.Fprintf(os.Stderr, "%v\n", err)
 			os.Exit(1)
@@ -207,7 +216,9 @@ func main() {
 	w := a.NewWindow(windowTitle)
 	initialWindowSize := fyne.NewSize(950, 600)
 	if !startControlPanelRuntimeGate(a, w, initialWindowSize, func() {
-		startControlPanelUI(w, a, initialWindowSize)
+		startJavaUpdateGate(w, initialWindowSize, func() {
+			startControlPanelUI(w, a, initialWindowSize)
+		})
 	}) {
 		return
 	}
@@ -635,9 +646,9 @@ func setupMenus(w fyne.Window, modulesMenu *fyne.Menu) *fyne.MainMenu {
 				dialog.ShowError(fmt.Errorf("failed to open directory: %w", err), w)
 			}
 		}),
-		// fyne.NewMenuItem("Cleanup Obsolete Java Versions", func() {
-		// 	cleanupJavaVersions(w)
-		// }),
+		fyne.NewMenuItem("Update Java", func() {
+			runJavaUpdateFromMenu(w)
+		}),
 		// fyne.NewMenuItem("Cleanup Obsolete Node.js Versions", func() {
 		// 	cleanupNodeVersions(w)
 		// }),
