@@ -116,6 +116,16 @@ func writeJavaRelease(home, version string) error {
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return err
 	}
+	if err := writeJavaLauncher(javaExecutable(home, GetGoos())); err != nil {
+		return err
+	}
 	return os.WriteFile(filepath.Join(home, "release"),
 		[]byte("IMPLEMENTOR=\"Eclipse Adoptium\"\nJAVA_VERSION=\""+version+"\"\n"), 0o644)
+}
+
+func writeJavaLauncher(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte("launcher"), 0o755)
 }

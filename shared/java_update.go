@@ -28,6 +28,7 @@ type JavaInstallation struct {
 	Version     string
 	Home        string
 	RuntimeRoot string
+	Executable  string
 }
 
 type JavaUpdateResult struct {
@@ -36,64 +37,9 @@ type JavaUpdateResult struct {
 	Updated  bool
 }
 
+// InspectJava returns the runtime that OWLCMS and Firmata launch with.
 func InspectJava(temurinVersion string) (*JavaInstallation, error) {
-	javaBase := filepath.Join(GetRuntimeDir(), "java")
-	entries, err := os.ReadDir(javaBase)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrJavaNotInstalled
-		}
-		return nil, fmt.Errorf("reading Java runtime directory: %w", err)
-	}
-
-	major, err := ExtractMajorVersion(temurinVersion)
-	if err != nil {
-		return nil, err
-	}
-
-	var best *JavaInstallation
-	for _, runtimeDir := range entries {
-		if !runtimeDir.IsDir() {
-			continue
-		}
-		root := filepath.Join(javaBase, runtimeDir.Name())
-		installs, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-		for _, install := range installs {
-			if !install.IsDir() {
-				continue
-			}
-			home := javaHomeForRoot(filepath.Join(root, install.Name()))
-			releaseVersion, err := readJavaReleaseVersion(home)
-			if err != nil {
-				continue
-			}
-			installedMajor, err := ExtractMajorVersion(releaseVersion)
-			if err != nil || installedMajor < major {
-				continue
-			}
-			candidate := &JavaInstallation{
-				Version:     releaseVersion,
-				Home:        home,
-				RuntimeRoot: root,
-			}
-			if best == nil {
-				best = candidate
-				continue
-			}
-			comparison, err := CompareJavaVersions(candidate.Version, best.Version)
-			if err == nil && comparison > 0 {
-				best = candidate
-			}
-		}
-	}
-
-	if best == nil {
-		return nil, ErrJavaNotInstalled
-	}
-	return best, nil
+	return bestInstalledJava(temurinVersion, GetGoos())
 }
 
 func CompareJavaVersions(left, right string) (int, error) {
@@ -180,17 +126,17 @@ func updateJava(temurinVersion, requiredVersion string, progress ProgressCallbac
 	ctx, stop := contextForJavaUpdate(cancel)
 	defer stop()
 
-	latestTag, err := FindLatestTemurinReleaseContext(ctx, temurinVersion, javaUpdateUserAgent)
+	latest, err := FindJavaRelease(ctx, temurinVersion, GetGoos, javaUpdateUserAgent)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, context.Canceled
 		}
 		return nil, err
 	}
-	latestVersion := strings.TrimSuffix(strings.TrimPrefix(latestTag, "jdk-"), "-LTS")
+	latestVersion := latest.Version
 	_, err = parseJavaVersion(latestVersion)
 	if err != nil {
-		return nil, fmt.Errorf("parsing latest Temurin version %q: %w", latestTag, err)
+		return nil, fmt.Errorf("parsing latest %s version %q: %w", latest.Distribution, latest.Tag, err)
 	}
 
 	current, inspectErr := InspectJava(temurinVersion)
@@ -224,20 +170,15 @@ func updateJava(temurinVersion, requiredVersion string, progress ProgressCallbac
 			return nil, meetErr
 		}
 		if !meets {
-			return nil, fmt.Errorf("latest Temurin release %s does not meet required Java %s", latestVersion, requiredVersion)
+			return nil, fmt.Errorf("latest %s release %s does not meet required Java %s",
+				latest.Distribution, latestVersion, requiredVersion)
 		}
 	}
 
 	if err := checkJavaUpdateCancellation(cancel); err != nil {
 		return nil, err
 	}
-	downloadURL, err := GetTemurinDownloadURLContext(ctx, latestTag, GetGoos, javaUpdateUserAgent)
-	if err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return nil, context.Canceled
-		}
-		return nil, err
-	}
+	downloadURL := latest.DownloadURL
 
 	runtimeDir := GetRuntimeDir()
 	if err := EnsureDir0755(runtimeDir); err != nil {
@@ -249,7 +190,7 @@ func updateJava(temurinVersion, requiredVersion string, progress ProgressCallbac
 	}
 	defer os.RemoveAll(staging)
 
-	archive := filepath.Join(staging, "temurin")
+	archive := filepath.Join(staging, "java-runtime")
 	switch {
 	case GetGoos() == "windows" && !IsWSL():
 		archive += ".zip"
@@ -296,7 +237,7 @@ func updateJava(temurinVersion, requiredVersion string, progress ProgressCallbac
 		}
 	}
 	if installedRoot == "" {
-		return nil, fmt.Errorf("downloaded Java archive does not contain Temurin %s", latestVersion)
+		return nil, fmt.Errorf("downloaded Java archive does not contain %s %s", latest.Distribution, latestVersion)
 	}
 
 	installedVersion, err := readJavaReleaseVersion(javaHomeForRoot(installedRoot))
@@ -390,13 +331,6 @@ func rejectJavaProcessesUsing(runtimeRoot string) error {
 		}
 	}
 	return nil
-}
-
-func javaHomeForRoot(root string) string {
-	if GetGoos() == "darwin" {
-		return filepath.Join(root, "Contents", "Home")
-	}
-	return root
 }
 
 func readJavaReleaseVersion(home string) (string, error) {

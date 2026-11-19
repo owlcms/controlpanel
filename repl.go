@@ -246,7 +246,7 @@ func writeREPLContext(out io.Writer) {
 func writeREPLHelp(out io.Writer) {
 	fmt.Fprintln(out, "Commands: context, help, java, exit, quit")
 	fmt.Fprintln(out, "  java status                        show installed Java and required minimum")
-	fmt.Fprintln(out, "  java update                        install the latest Temurin 25")
+	fmt.Fprintln(out, "  java update                        install the latest Java 25")
 	fmt.Fprintln(out, "  secret encrypt <keyname> <value>   print the value encrypted with ~/.owlcms/<keyname> (enc:v1:...)")
 	fmt.Fprintln(out, "Type 'owlcms' or 'tracker' alone to make it the default module for the following commands.")
 	fmt.Fprintln(out, "Use 'owlcms help' for OWLCMS commands.")

@@ -44,7 +44,7 @@ func checkJavaAtHeadlessStartup(in *bufio.Reader, interactive bool, out, errOut 
 		return
 	}
 
-	fmt.Fprint(out, "Download and install the latest Temurin 25 now? [Y/n] ")
+	fmt.Fprint(out, "Download and install the latest Java 25 now? [Y/n] ")
 	answer, readErr := in.ReadString('\n')
 	if readErr != nil && len(answer) == 0 {
 		fmt.Fprintf(errOut, "Cannot read Java update choice: %v\n", readErr)

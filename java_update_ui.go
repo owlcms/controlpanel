@@ -41,7 +41,7 @@ func startJavaUpdateGate(w fyne.Window, initialWindowSize fyne.Size, start func(
 	w.Show()
 
 	message := fmt.Sprintf(
-		"OWLCMS requires Java %s.\n\nInstalled Java: %s\n\nDownload and install the latest Temurin 25 now? You may cancel or skip this update.",
+		"OWLCMS requires Java %s.\n\nInstalled Java: %s\n\nDownload and install the latest Java 25 now? You may cancel or skip this update.",
 		shared.MinimumJavaVersion, displayJavaVersion(installedVersion))
 	confirm := dialog.NewConfirm("Java Security Update", message, func(update bool) {
 		if !update {
@@ -63,7 +63,7 @@ func runJavaUpdateDialog(w fyne.Window, after func(), forceLatest bool) {
 	progress := widget.NewProgressBar()
 	progress.Min = 0
 	progress.Max = 1
-	status := widget.NewLabel("Checking the latest Temurin release...")
+	status := widget.NewLabel("Checking the latest Java release...")
 	progressDialog := dialog.NewCustom("Updating Java", "Cancel", container.NewVBox(status, progress), w)
 	cancel := make(chan bool)
 	var cancelOnce sync.Once
@@ -81,7 +81,7 @@ func runJavaUpdateDialog(w fyne.Window, after func(), forceLatest bool) {
 			percentage := float64(downloaded) / float64(total)
 			fyne.Do(func() {
 				progress.SetValue(percentage)
-				status.SetText(fmt.Sprintf("Downloading Temurin 25... %.0f%%", percentage*100))
+				status.SetText(fmt.Sprintf("Downloading Java 25... %.0f%%", percentage*100))
 			})
 		}
 		var result *shared.JavaUpdateResult
@@ -110,7 +110,7 @@ func runJavaUpdateDialog(w fyne.Window, after func(), forceLatest bool) {
 					fmt.Sprintf("Java was updated from %s to %s.", displayJavaVersion(result.Previous), result.Current), w)
 			case result != nil && forceLatest:
 				dialog.ShowInformation("Java Up to Date",
-					fmt.Sprintf("Java %s is already the latest available Temurin 25 release.", result.Current), w)
+					fmt.Sprintf("Java %s is already the latest available Java 25 release.", result.Current), w)
 			}
 		})
 	}()

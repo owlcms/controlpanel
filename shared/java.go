@@ -133,15 +133,15 @@ func DownloadAndInstallJava(temurinVersion string, statusLabel *widget.Label, w 
 	if progressBar != nil {
 		fyne.Do(func() { progressBar.SetValue(0.05) })
 	}
-	downloadURL, err := GetTemurinDownloadURL(temurinVersion, goosFunc, "controlpanel")
+	downloadURL, err := GetJavaDownloadURL(temurinVersion, goosFunc, "controlpanel")
 	if err != nil {
 		if progressDialog != nil {
 			fyne.Do(progressDialog.Hide)
 		}
-		return fmt.Errorf("getting Temurin download URL: %w", err)
+		return fmt.Errorf("getting Java download URL: %w", err)
 	}
 
-	archivePath := filepath.Join(javaDir, "temurin")
+	archivePath := filepath.Join(javaDir, "java-runtime")
 	if goosFunc() == "windows" && !IsWSL() {
 		archivePath += ".zip"
 	} else {
@@ -176,14 +176,14 @@ func DownloadAndInstallJava(temurinVersion string, statusLabel *widget.Label, w 
 			if progressDialog != nil {
 				fyne.Do(progressDialog.Hide)
 			}
-			return fmt.Errorf("error extracting Temurin zip: %w", err)
+			return fmt.Errorf("error extracting Java zip: %w", err)
 		}
 	} else {
 		if err := ExtractTarGz(archivePath, javaDir); err != nil {
 			if progressDialog != nil {
 				fyne.Do(progressDialog.Hide)
 			}
-			return fmt.Errorf("extracting Temurin tar.gz: %w", err)
+			return fmt.Errorf("extracting Java tar.gz: %w", err)
 		}
 	}
 

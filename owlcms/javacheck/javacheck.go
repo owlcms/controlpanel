@@ -47,7 +47,7 @@ func CheckJavaHeadless() error {
 		log.Printf("*** Local Java not found at %s: %v\n", javaPath, err)
 	}
 
-	fmt.Println("Suitable Java not found. Downloading from Temurin...")
+	fmt.Println("Suitable Java not found. Downloading Java...")
 	log.Println("Downloading a local copy of the Java language runtime.")
 
 	var temurinVersion string
@@ -70,12 +70,12 @@ func CheckJavaHeadless() error {
 		return fmt.Errorf("creating java directory: %w", err)
 	}
 
-	downloadURL, err := shared.GetTemurinDownloadURL(temurinVersion, shared.GetGoos, "controlpanel")
+	downloadURL, err := shared.GetJavaDownloadURL(temurinVersion, shared.GetGoos, "controlpanel")
 	if err != nil {
-		return fmt.Errorf("getting Temurin download URL: %w", err)
+		return fmt.Errorf("getting Java download URL: %w", err)
 	}
 
-	archivePath := filepath.Join(javaDir, "temurin")
+	archivePath := filepath.Join(javaDir, "java-runtime")
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
 		archivePath += ".zip"
 	} else {
@@ -98,11 +98,11 @@ func CheckJavaHeadless() error {
 	log.Println("Extracting files...")
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
 		if err := shared.ExtractZip(archivePath, javaDir, false); err != nil {
-			return fmt.Errorf("error extracting Temurin zip: %w", err)
+			return fmt.Errorf("error extracting Java zip: %w", err)
 		}
 	} else {
 		if err := shared.ExtractTarGz(archivePath, javaDir); err != nil {
-			return fmt.Errorf("extracting Temurin tar.gz: %w", err)
+			return fmt.Errorf("extracting Java tar.gz: %w", err)
 		}
 	}
 
@@ -122,7 +122,7 @@ func CheckJava(statusLabel *widget.Label) error {
 		log.Printf("*** Local Java not found at %s: %v\n", javaPath, err)
 	}
 
-	fmt.Println("Suitable Java not found. Downloading from Temurin...")
+	fmt.Println("Suitable Java not found. Downloading Java...")
 	statusLabel.SetText("Downloading a local copy of the Java language runtime.")
 	statusLabel.Refresh()
 	statusLabel.Show()
@@ -166,13 +166,13 @@ func CheckJava(statusLabel *widget.Label) error {
 
 	// Show activity while getting the download URL
 	progressBar.SetValue(0.05)
-	downloadURL, err := shared.GetTemurinDownloadURL(temurinVersion, shared.GetGoos, "controlpanel")
+	downloadURL, err := shared.GetJavaDownloadURL(temurinVersion, shared.GetGoos, "controlpanel")
 	if err != nil {
 		progressDialog.Hide()
-		return fmt.Errorf("getting Temurin download URL: %w", err)
+		return fmt.Errorf("getting Java download URL: %w", err)
 	}
 
-	archivePath := filepath.Join(javaDir, "temurin")
+	archivePath := filepath.Join(javaDir, "java-runtime")
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
 		archivePath += ".zip"
 	} else {
@@ -205,12 +205,12 @@ func CheckJava(statusLabel *widget.Label) error {
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
 		if err := shared.ExtractZip(archivePath, javaDir, false); err != nil {
 			progressDialog.Hide()
-			return fmt.Errorf("error extracting Temurin zip: %w", err)
+			return fmt.Errorf("error extracting Java zip: %w", err)
 		}
 	} else {
 		if err := shared.ExtractTarGz(archivePath, javaDir); err != nil {
 			progressDialog.Hide()
-			return fmt.Errorf("extracting Temurin tar.gz: %w", err)
+			return fmt.Errorf("extracting Java tar.gz: %w", err)
 		}
 	}
 

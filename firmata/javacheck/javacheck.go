@@ -60,7 +60,7 @@ func CheckJava(statusLabel *widget.Label) error {
 	// 		log.Printf("System Java version %d is too old, need 17 or later\n", version)
 	// 	}
 	// }
-	fmt.Println("Suitable Java not found. Downloading from Temurin...")
+	fmt.Println("Suitable Java not found. Downloading Java...")
 	statusLabel.SetText("Downloading a local copy of the Java language runtime.")
 	statusLabel.Refresh()
 	statusLabel.Show()
@@ -104,13 +104,13 @@ func CheckJava(statusLabel *widget.Label) error {
 
 	// Show activity while getting the download URL
 	progressBar.SetValue(0.05)
-	url, err := shared.GetTemurinDownloadURL(temurinVersion, shared.GetGoos, "firmata-launcher")
+	url, err := shared.GetJavaDownloadURL(temurinVersion, shared.GetGoos, "firmata-launcher")
 	if err != nil {
 		progressDialog.Hide()
-		return fmt.Errorf("getting Temurin download URL: %w", err)
+		return fmt.Errorf("getting Java download URL: %w", err)
 	}
 
-	archivePath := filepath.Join(javaDir, "temurin")
+	archivePath := filepath.Join(javaDir, "java-runtime")
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
 		archivePath += ".zip"
 	} else {
@@ -135,7 +135,7 @@ func CheckJava(statusLabel *widget.Label) error {
 
 			return nil
 		}
-		return fmt.Errorf("error downloading Temurin: %w", err)
+		return fmt.Errorf("error downloading Java: %w", err)
 	}
 
 	// Show extraction progress
@@ -143,12 +143,12 @@ func CheckJava(statusLabel *widget.Label) error {
 	if shared.GetGoos() == "windows" && !shared.IsWSL() {
 		if err := shared.ExtractZip(archivePath, javaDir, false); err != nil {
 			progressDialog.Hide()
-			return fmt.Errorf("error extracting Temurin zip: %w", err)
+			return fmt.Errorf("error extracting Java zip: %w", err)
 		}
 	} else {
 		if err := shared.ExtractTarGz(archivePath, javaDir); err != nil {
 			progressDialog.Hide()
-			return fmt.Errorf("extracting Temurin tar.gz: %w", err)
+			return fmt.Errorf("extracting Java tar.gz: %w", err)
 		}
 	}
 
