@@ -13,6 +13,7 @@ The control panel is installed once. It will automatically download the correct 
 ### 3.10.2
 
 - Require an update Java version to a 25.0.5.1 as precaution.  From now on, a minimum release will be enforced.
+  = Liberica is now used as Java distribution, with Temurin as fall back (Temurin did not provide a timely update for Intel architectures)
 
 ### 3.10.1
 
