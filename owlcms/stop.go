@@ -141,6 +141,20 @@ func StopRunningOwlcms() (*stopTrace, error) {
 	validate := func() error { return portowner.ValidateListener(listener, portNum) }
 	if err := requestOwlcmsStop(running.Port, token); err != nil {
 		trace.add("HTTP stop not accepted: %v", err)
+		released, exited, waitErr := portowner.WaitForExitAfterPortRelease(listener, portNum, 20*time.Second)
+		if waitErr != nil {
+			trace.add("Cannot determine shutdown state: %v", waitErr)
+			return trace, waitErr
+		}
+		if released {
+			trace.add("PID %d no longer listens; waiting for shutdown to finish", listener.PID)
+			validate = func() error { return portowner.ValidateAlive(listener) }
+			if exited {
+				trace.add("PID %d exited after releasing the port", listener.PID)
+			} else {
+				trace.add("PID %d still running after 20s; terminating it", listener.PID)
+			}
+		}
 	} else {
 		trace.add("HTTP stop accepted; port released")
 		exited, err := portowner.WaitForExit(listener, 20*time.Second)
@@ -192,7 +206,22 @@ func stopOwnedOwlcms(cmd *exec.Cmd, port string) error {
 	}
 	log.Printf("Stopping owned OWLCMS PID %d on port %s: HTTP stop (token %s)", pid, port, presence(token))
 	if err := requestOwlcmsStop(port, token); err != nil {
-		log.Printf("OWLCMS PID %d: HTTP stop not accepted (%v); stopping through the process handle", pid, err)
+		log.Printf("OWLCMS PID %d: HTTP stop not accepted (%v)", pid, err)
+		portNum, portErr := strconv.Atoi(strings.TrimSpace(port))
+		identity, inspectErr := portowner.Inspect(int32(pid))
+		if portErr == nil && inspectErr == nil {
+			released, exited, waitErr := portowner.WaitForExitAfterPortRelease(identity, portNum, 20*time.Second)
+			if waitErr == nil && released {
+				if exited {
+					log.Printf("OWLCMS PID %d exited after releasing port %s", pid, port)
+					return nil
+				}
+				log.Printf("OWLCMS PID %d released port %s but is still running; stopping through the process handle", pid, port)
+			} else if waitErr != nil {
+				log.Printf("OWLCMS PID %d: cannot determine shutdown state: %v", pid, waitErr)
+			}
+		}
+		log.Printf("OWLCMS PID %d: stopping through the process handle", pid)
 		return shared.StopOwnedProcess(cmd, 10*time.Second)
 	}
 	// the port is released before the shutdown hooks finish; wait for the process

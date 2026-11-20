@@ -153,7 +153,20 @@ func confirmStopOwlcmsPortTarget(target *owlcmsPortTarget, w fyne.Window, onDone
 func requestOwlcmsStopTarget(target *owlcmsPortTarget) bool {
 	if err := requestOwlcmsStop(strconv.Itoa(target.port), owlcmsTokenFor(target.assessment)); err != nil {
 		log.Printf("OWLCMS HTTP stop on port %d did not succeed: %v", target.port, err)
-		return false
+		released, exited, waitErr := portowner.WaitForExitAfterPortRelease(
+			target.assessment.Listener, target.port, 20*time.Second)
+		if waitErr != nil {
+			log.Printf("Cannot determine shutdown state for PID %d: %v", target.assessment.Listener.PID, waitErr)
+			return false
+		}
+		if !released {
+			return false
+		}
+		target.stopAccepted = true
+		if !exited {
+			log.Printf("OWLCMS PID %d released port %d but is still running", target.assessment.Listener.PID, target.port)
+		}
+		return exited
 	}
 	target.stopAccepted = true
 	exited, err := portowner.WaitForExit(target.assessment.Listener, 20*time.Second)

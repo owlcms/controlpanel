@@ -3,6 +3,7 @@ package owlcms
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -387,10 +388,10 @@ func GetLastRunVersion() string {
 }
 
 // LaunchDaemon starts OWLCMS headlessly (no UI) in daemon mode: it detaches
-// the child and returns once the port is ready. On Linux the child is
-// MainWrapper, which relaunches OWLCMS on a restartable exit after this
-// process is gone.
-func LaunchDaemon(version string) error {
+// the child and returns once OWLCMS reports it is ready, copying its
+// startup.log to out meanwhile. On Linux the child is MainWrapper, which
+// relaunches OWLCMS on a restartable exit after this process is gone.
+func LaunchDaemon(version string, out io.Writer) error {
 	log.Printf("LaunchDaemon: starting OWLCMS %s headlessly", version)
 
 	params, err := prepareOwlcmsLaunch(version, nil, false)
@@ -412,7 +413,7 @@ func LaunchDaemon(version string) error {
 		log.Printf("LaunchDaemon: port %s successfully freed", params.TargetPort)
 	}
 
-	return launchDaemonDetached(version, params)
+	return launchDaemonDetached(version, params, out)
 }
 
 // LaunchForeground starts OWLCMS from the command line and blocks until it exits.
@@ -515,7 +516,7 @@ func runSupervisedOnce(version string, params *owlcmsLaunchParams) (error, error
 // launchDaemonDetached starts OWLCMS detached using MainWrapper and setsid.
 // It is used by CLI daemon launches where the Java child must survive after
 // the command exits. It is not used by GUI launches.
-func launchDaemonDetached(version string, params *owlcmsLaunchParams) error {
+func launchDaemonDetached(version string, params *owlcmsLaunchParams, out io.Writer) error {
 	useDaemonWrapper := shouldUseOwlcmsDaemonWrapper()
 	cmd := buildOwlcmsCommand(params, useDaemonWrapper)
 	shared.ConfigureNoConsoleWindow(cmd)
@@ -524,6 +525,14 @@ func launchDaemonDetached(version string, params *owlcmsLaunchParams) error {
 	cmd.Env = env
 	cmd.Dir = params.VersionDir
 
+	withStartupLog := owlcmsSupportsStartupLog(version)
+	startupLogPath := filepath.Join(params.VersionDir, "logs", "startup.log")
+	if withStartupLog {
+		if err := os.Remove(startupLogPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: Failed to remove old startup.log: %v", err)
+		}
+	}
+
 	log.Printf("LaunchDaemon: command %v in %s", cmd.Args, params.VersionDir)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start OWLCMS %s: %w", version, err)
@@ -531,6 +540,26 @@ func launchDaemonDetached(version string, params *owlcmsLaunchParams) error {
 
 	pid := cmd.Process.Pid
 	activeRuntime = recordOwlcmsStart(pid, version, params.TargetPort, true, token)
+
+	if withStartupLog {
+		// the port opens long before OWLCMS can serve requests: wait for its own ready report
+		log.Printf("LaunchDaemon: OWLCMS %s (PID %d), following %s", version, pid, startupLogPath)
+		ready, alive := followStartupLog(startupLogPath, func() bool { return shared.IsProcessRunning(pid) },
+			out, daemonStartupTimeout, 250*time.Millisecond)
+		switch {
+		case ready:
+			log.Printf("LaunchDaemon: OWLCMS %s ready (PID %d)", version, pid)
+			return nil
+		case !alive:
+			return fmt.Errorf("OWLCMS %s (PID %d) exited before becoming ready", version, pid)
+		case shared.CheckPort(params.TargetPort) == nil:
+			fmt.Fprintf(out, "OWLCMS %s did not report ready within %s; it is still starting (see %s)\n",
+				version, daemonStartupTimeout, filepath.Dir(startupLogPath))
+			return nil
+		default:
+			return fmt.Errorf("timed out waiting for OWLCMS %s on port %s", version, params.TargetPort)
+		}
+	}
 
 	log.Printf("LaunchDaemon: OWLCMS %s (PID %d), waiting for port %s...", version, pid, params.TargetPort)
 	deadline := time.Now().Add(60 * time.Second)
@@ -545,6 +574,58 @@ func launchDaemonDetached(version string, params *owlcmsLaunchParams) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for OWLCMS %s on port %s", version, params.TargetPort)
+}
+
+// daemonStartupTimeout bounds how long a headless start follows startup.log.
+const daemonStartupTimeout = 180 * time.Second
+
+// followStartupLog copies what OWLCMS appends to logPath to out until OWLCMS
+// reports it is ready, alive reports that it exited, or timeout expires. The
+// file may not exist yet. It returns whether OWLCMS reported ready and whether
+// it was still alive at the end.
+func followStartupLog(logPath string, alive func() bool, out io.Writer, timeout, poll time.Duration) (ready, running bool) {
+	var seen strings.Builder
+	var offset int64
+	readNew := func() {
+		file, err := os.Open(logPath)
+		if err != nil {
+			return
+		}
+		defer file.Close()
+		if stat, err := file.Stat(); err == nil && stat.Size() < offset {
+			offset = 0 // recreated, for example by a MainWrapper restart
+		}
+		if _, err := file.Seek(offset, io.SeekStart); err != nil {
+			return
+		}
+		data, err := io.ReadAll(file)
+		if len(data) == 0 || err != nil {
+			return
+		}
+		offset += int64(len(data))
+		out.Write(data)
+		seen.Write(data)
+	}
+	isReady := func() bool {
+		text := seen.String()
+		return strings.Contains(text, "OWLCMS Ready.") || strings.Contains(text, "owlcms Ready.")
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		readNew()
+		if isReady() {
+			return true, true
+		}
+		if !alive() {
+			readNew()
+			return isReady(), false
+		}
+		if time.Now().After(deadline) {
+			return false, true
+		}
+		time.Sleep(poll)
+	}
 }
 
 var (

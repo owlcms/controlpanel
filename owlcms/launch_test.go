@@ -1,13 +1,62 @@
 package owlcms
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"controlpanel/shared"
 
 	"github.com/magiconair/properties"
 )
+
+func TestFollowStartupLogCopiesUntilReady(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "startup.log")
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		os.WriteFile(logPath, []byte("Starting Web Server on port 80\n"), 0o644)
+		time.Sleep(30 * time.Millisecond)
+		f, _ := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o644)
+		f.WriteString("Starting database.\nOWLCMS Ready.\n")
+		f.Close()
+	}()
+
+	var out bytes.Buffer
+	ready, alive := followStartupLog(logPath, func() bool { return true }, &out, 5*time.Second, 10*time.Millisecond)
+
+	if !ready || !alive {
+		t.Fatalf("ready=%v alive=%v, want both true", ready, alive)
+	}
+	want := "Starting Web Server on port 80\nStarting database.\nOWLCMS Ready.\n"
+	if out.String() != want {
+		t.Fatalf("copied %q, want %q", out.String(), want)
+	}
+}
+
+func TestFollowStartupLogStopsWhenProcessExits(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "startup.log")
+	os.WriteFile(logPath, []byte("Starting Web Server on port 80\n"), 0o644)
+	var running atomic.Bool
+	running.Store(true)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		running.Store(false)
+	}()
+
+	var out bytes.Buffer
+	ready, alive := followStartupLog(logPath, running.Load, &out, 5*time.Second, 10*time.Millisecond)
+
+	if ready || alive {
+		t.Fatalf("ready=%v alive=%v, want both false", ready, alive)
+	}
+	if out.String() != "Starting Web Server on port 80\n" {
+		t.Fatalf("copied %q", out.String())
+	}
+}
 
 func TestShouldUseOwlcmsDaemonWrapperForDetachedDaemonMode(t *testing.T) {
 	t.Setenv("CONTROLPANEL_RUN_AS_DAEMON", "true")

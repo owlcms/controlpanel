@@ -179,6 +179,78 @@ func TestStopListenerChild(t *testing.T) {
 	}
 }
 
+func TestWaitForExitAfterPortRelease(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestHelperListen")
+	cmd.Env = append(os.Environ(),
+		"PORTOWNER_HELPER_LISTEN="+strconv.Itoa(port),
+		"PORTOWNER_HELPER_CLOSE_AFTER=250ms",
+		"PORTOWNER_HELPER_EXIT_AFTER=250ms",
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		cmd.Wait()
+		close(done)
+	}()
+	defer func() {
+		cmd.Process.Kill()
+		<-done
+	}()
+
+	var listener Identity
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		listeners, err := FindListeners(port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, candidate := range listeners {
+			if candidate.PID == int32(cmd.Process.Pid) {
+				listener, err = Inspect(candidate.PID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				break
+			}
+		}
+		if listener.PID != 0 {
+			break
+		}
+	}
+	if listener.PID == 0 {
+		t.Fatalf("helper PID %d never listened on port %d", cmd.Process.Pid, port)
+	}
+
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		listeners, err := FindListeners(port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listeners) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("helper did not release the port")
+		}
+	}
+
+	released, exited, err := WaitForExitAfterPortRelease(listener, port, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !released || !exited {
+		t.Fatalf("released=%v exited=%v, want both true", released, exited)
+	}
+}
+
 // TestEnvValueFromChild starts a child with a variable in its environment and
 // reads it back through the OS, as done for the OWLCMS launch token.
 func TestEnvValueFromChild(t *testing.T) {
@@ -218,6 +290,22 @@ func TestHelperListen(t *testing.T) {
 		os.Exit(2)
 	}
 	defer l.Close()
+	if closeAfter := os.Getenv("PORTOWNER_HELPER_CLOSE_AFTER"); closeAfter != "" {
+		delay, err := time.ParseDuration(closeAfter)
+		if err != nil {
+			os.Exit(2)
+		}
+		time.Sleep(delay)
+		l.Close()
+		if exitAfter := os.Getenv("PORTOWNER_HELPER_EXIT_AFTER"); exitAfter != "" {
+			delay, err = time.ParseDuration(exitAfter)
+			if err != nil {
+				os.Exit(2)
+			}
+			time.Sleep(delay)
+			return
+		}
+	}
 	time.Sleep(30 * time.Second)
 	os.Exit(0)
 }

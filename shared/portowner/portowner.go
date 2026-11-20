@@ -598,6 +598,30 @@ func ValidateListener(id Identity, port int) error {
 	return fmt.Errorf("PID %d no longer appears as a listener on port %d; refusing to act", id.PID, port)
 }
 
+// WaitForExitAfterPortRelease checks whether id has stopped listening. If it
+// has, it waits for the same process to finish its shutdown rather than treating
+// the released port as a termination failure.
+func WaitForExitAfterPortRelease(id Identity, port int, timeout time.Duration) (released, exited bool, err error) {
+	alive, err := SameProcess(id)
+	if err != nil {
+		return false, false, err
+	}
+	if !alive {
+		return true, true, nil
+	}
+	listeners, err := FindListeners(port)
+	if err != nil {
+		return false, false, err
+	}
+	for _, listener := range listeners {
+		if listener.PID == id.PID {
+			return false, false, nil
+		}
+	}
+	exited, err = WaitForExit(id, timeout)
+	return true, exited, err
+}
+
 // ValidateParent checks that parent is unchanged and is still child's parent.
 func ValidateParent(child, parent Identity) error {
 	alive, err := SameProcess(parent)

@@ -186,7 +186,7 @@ func executeModuleLaunch(cmd moduleCLICommand, out io.Writer) error {
 			return err
 		}
 		if cmd.Module == "owlcms" {
-			if err := owlcms.LaunchDaemon(version); err != nil {
+			if err := owlcms.LaunchDaemon(version, out); err != nil {
 				return err
 			}
 		} else if err := tracker.LaunchDaemon(version); err != nil {
