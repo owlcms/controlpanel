@@ -9,6 +9,13 @@ The control panel is installed once. It will automatically download the correct 
 
 ## Release Log
 
+### 3.11.0
+
+- Installing owlcms no longer extracts the local files; the update and import process from a prior version copy the
+  minimum number of files to the new version
+  - css, flags, pictures, logos etc that have been added or modified are migrated
+  - For templates, the process is slightly different: If a folder containing new, modified or removed templates is found, it is migrated as is
+  - The same is true for age group definitions
 
 ### 3.10.2
 
