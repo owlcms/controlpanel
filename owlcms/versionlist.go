@@ -192,9 +192,7 @@ func createVersionList(w fyne.Window, stopBtn *widget.Button) *widget.List {
 			if len(allReleases) > 0 {
 				createUpdateButton(version, w, buttonContainer)
 			}
-			if len(versions) > 1 {
-				createImportButton(versions, version, w, buttonContainer)
-			}
+			createImportButton(versions, version, w, buttonContainer)
 			shared.CreateDuplicateButton(installDir, version, w, buttonContainer, func(newVersion string) {
 				recomputeVersionList(w)
 			})
@@ -254,29 +252,83 @@ func createImportButton(versions []string, version string, w fyne.Window, button
 	importButton := widget.NewButton("Import", nil)
 	importButton.Show()
 	importButton.OnTapped = func() {
-		// Open a dialog to select the source version
-		sourceVersions := filterVersions(versions, version) // Filter out the current version
+		extractOption := fmt.Sprintf("%s (extract from distribution)", version)
+		sourceVersions := append([]string{extractOption}, filterVersions(versions, version)...)
 		sourceVersionDropdown := widget.NewSelect(sourceVersions, func(selected string) {})
 		// Wrap in a fixed-size container to ensure adequate width
-		selectContainer := container.NewGridWrap(fyne.NewSize(300, 35), sourceVersionDropdown)
+		selectContainer := container.NewGridWrap(fyne.NewSize(380, 35), sourceVersionDropdown)
+		dryRunCheck := widget.NewCheck("Create a dry-run report (no files changed)", nil)
 
 		dialog.ShowForm("Import Data and Config",
 			"Import",
 			"Cancel",
 			[]*widget.FormItem{
 				widget.NewFormItem("Copy from version", selectContainer),
+				widget.NewFormItem("", dryRunCheck),
 			},
 			func(ok bool) {
 				if !ok {
 					return
 				}
 
-				sourceVersion := sourceVersionDropdown.Selected
-				if sourceVersion == "" {
+				selected := sourceVersionDropdown.Selected
+				if selected == "" {
 					dialog.ShowError(fmt.Errorf("source version cannot be empty"), w)
 					return
 				}
 
+				if selected == extractOption {
+					if dryRunCheck.Checked {
+						go func() {
+							reportPath, err := DryRunExtractLocalFromDistribution(version)
+							fyne.Do(func() {
+								if err != nil {
+									log.Printf("Error while generating dry-run extraction report: %v\n", err)
+									dialog.ShowError(fmt.Errorf("failed to create dry-run report: %w", err), w)
+									return
+								}
+								showMigrationReportDialog(
+									"Dry-Run Extraction Report",
+									fmt.Sprintf("Dry-run report saved (no files were modified):\n\n%s", reportPath),
+									reportPath,
+									w,
+								)
+							})
+						}()
+						return
+					}
+
+					confirmMsg := fmt.Sprintf("This will extract locally customizable files from version %s into its local/ folder.\n\n"+
+						"Existing files in local/ will NOT be overwritten, and your database and env.properties will not be changed.\n\n"+
+						"Do you want to continue?", version)
+					dialog.ShowConfirm("Extract from Distribution",
+						confirmMsg,
+						func(confirmed bool) {
+							if !confirmed {
+								return
+							}
+							go func() {
+								reportPath, err := ExtractLocalFromDistribution(version)
+								fyne.Do(func() {
+									if err != nil {
+										log.Printf("Error while extracting distribution files: %v\n", err)
+										dialog.ShowError(fmt.Errorf("failed to extract distribution files: %w", err), w)
+										return
+									}
+									msg := fmt.Sprintf("Successfully extracted customizable files from version %s", version)
+									if reportPath != "" {
+										showMigrationReportDialog("Extraction Complete", msg, reportPath, w)
+										return
+									}
+									dialog.ShowInformation("Extraction Complete", msg, w)
+								})
+							}()
+						},
+						w)
+					return
+				}
+
+				sourceVersion := selected
 				sourceDir := filepath.Join(installDir, sourceVersion)
 
 				if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
@@ -284,11 +336,31 @@ func createImportButton(versions []string, version string, w fyne.Window, button
 					return
 				}
 
+				if dryRunCheck.Checked {
+					go func() {
+						reportPath, err := DryRunImportLocalFiles(sourceVersion, version)
+						fyne.Do(func() {
+							if err != nil {
+								log.Printf("Error while generating dry-run migration report: %v\n", err)
+								dialog.ShowError(fmt.Errorf("failed to create dry-run report: %w", err), w)
+								return
+							}
+							showMigrationReportDialog(
+								"Dry-Run Migration Report",
+								fmt.Sprintf("Dry-run report saved (no files were modified):\n\n%s", reportPath),
+								reportPath,
+								w,
+							)
+						})
+					}()
+					return
+				}
+
 				// Show warning about destructive operation
 				warningMsg := fmt.Sprintf("⚠️ WARNING: Import Process\n\n"+
 					"This will:\n"+
-					"1. Extract fresh local files from version %s (any changes you made directly in version %s will be LOST)\n"+
-					"2. Apply the same additions, deletions and modifications you made in version %s\n\n"+
+					"1. Replace any local files in version %s (any changes you made directly in version %s will be LOST)\n"+
+					"2. Copy local additions and modifications from version %s (skipping files that match the distribution)\n\n"+
 					"Do you want to continue?", version, version, sourceVersion)
 
 				dialog.ShowConfirm("Confirm Import",
@@ -298,28 +370,55 @@ func createImportButton(versions []string, version string, w fyne.Window, button
 							return
 						}
 
-						if _, err := ImportDataAndConfig(sourceVersion, version); err != nil {
-							if showFileInUseRecovery(err, w, func() {
-								if _, retryErr := ImportDataAndConfig(sourceVersion, version); retryErr != nil {
-									dialog.ShowError(fmt.Errorf("failed to process local files: %w", retryErr), w)
-									return
-								}
-								dialog.ShowInformation("Import Complete", fmt.Sprintf("Successfully imported data and config from version %s to version %s", sourceVersion, version), w)
-							}) {
-								return
-							}
-							log.Printf("Error while processing local files: %v\n", err)
-							dialog.ShowError(fmt.Errorf("failed to process local files: %w", err), w)
-							return
+						var runImport func()
+						runImport = func() {
+							go func() {
+								res, err := ImportDataAndConfig(sourceVersion, version)
+								fyne.Do(func() {
+									if err != nil {
+										if showFileInUseRecovery(err, w, runImport) {
+											return
+										}
+										log.Printf("Error while processing local files: %v\n", err)
+										dialog.ShowError(fmt.Errorf("failed to process local files: %w", err), w)
+										return
+									}
+									msg := fmt.Sprintf("Successfully imported data and config from version %s to version %s", sourceVersion, version)
+									if res.MigrationReportPath != "" {
+										showMigrationReportDialog("Import Complete", msg, res.MigrationReportPath, w)
+										return
+									}
+									dialog.ShowInformation("Import Complete", msg, w)
+								})
+							}()
 						}
-
-						dialog.ShowInformation("Import Complete", fmt.Sprintf("Successfully imported data and config from version %s to version %s", sourceVersion, version), w)
+						runImport()
 					},
 					w)
 			},
 			w)
 	}
 	buttonContainer.Add(container.NewPadded(importButton))
+}
+
+func showMigrationReportDialog(title, message, reportPath string, w fyne.Window) {
+	openReportLink := widget.NewHyperlink("Open report", nil)
+	openReportLink.OnTapped = func() {
+		if err := shared.OpenFile(reportPath); err != nil {
+			dialog.ShowError(err, w)
+		}
+	}
+	openFolderLink := widget.NewHyperlink("Open folder", nil)
+	openFolderLink.OnTapped = func() {
+		if err := shared.OpenFileExplorer(filepath.Dir(reportPath)); err != nil {
+			dialog.ShowError(err, w)
+		}
+	}
+	content := container.NewVBox(
+		widget.NewLabel(message),
+		container.NewHBox(openReportLink, openFolderLink),
+	)
+	dialog.NewCustom(title, "OK", content, w).Show()
 }
 
 func createUpdateButton(version string, w fyne.Window, buttonContainer *fyne.Container) {
@@ -523,42 +622,65 @@ func updateVersion(existingVersion string, targetVersion string, w fyne.Window) 
 
 	actionProgressCallback := func(downloaded, total int64) {
 		if total > 0 {
-			actionProgressBar.SetValue(float64(downloaded) / float64(total))
+			progress := float64(downloaded) / float64(total)
+			fyne.Do(func() {
+				actionProgressBar.SetValue(progress)
+			})
 		}
 	}
 
-	actionResult, actionErr := UpdateRelease(existingVersion, targetVersion, actionProgressCallback, actionCancel)
-	if actionErr != nil {
-		actionProgressDialog.Hide()
-		if showFileInUseRecovery(actionErr, w, func() {
-			updateVersion(existingVersion, targetVersion, w)
-		}) {
-			return
-		}
-		dialog.ShowError(actionErr, w)
-		return
-	}
+	go func() {
+		actionResult, actionErr := UpdateRelease(existingVersion, targetVersion, actionProgressCallback, actionCancel)
+		fyne.Do(func() {
+			actionProgressDialog.Hide()
+			if actionErr != nil {
+				if showFileInUseRecovery(actionErr, w, func() {
+					updateVersion(existingVersion, targetVersion, w)
+				}) {
+					return
+				}
+				dialog.ShowError(actionErr, w)
+				return
+			}
 
-	actionProgressDialog.Hide()
-	actionSuccessMessage := fmt.Sprintf("Successfully updated to version %s\n", actionResult.Version)
-	if actionResult.DatabaseCopied {
-		actionSuccessMessage += "\n✓ Database files have been copied"
-	}
-	if actionResult.LocalFilesCopied {
-		actionSuccessMessage += "\n✓ Local configuration files have been processed"
-	}
-	actionSuccessDialog := dialog.NewCustom(
-		"Update Complete",
-		"OK",
-		container.NewVBox(widget.NewLabel(actionSuccessMessage)),
-		w,
-	)
-	actionSuccessDialog.SetOnClosed(func() {
-		recomputeVersionList(w)
-		checkForNewerVersion()
-		w.Content().Refresh()
-	})
-	actionSuccessDialog.Show()
+			actionSuccessMessage := fmt.Sprintf("Successfully updated to version %s\n", actionResult.Version)
+			if actionResult.DatabaseCopied {
+				actionSuccessMessage += "\n✓ Database files have been copied"
+			}
+			if actionResult.LocalFilesCopied {
+				actionSuccessMessage += "\n✓ Local configuration files have been processed"
+			}
+			actionSuccessContent := container.NewVBox(widget.NewLabel(actionSuccessMessage))
+			if actionResult.MigrationReportPath != "" {
+				reportPath := actionResult.MigrationReportPath
+				openReportLink := widget.NewHyperlink("Open migration report", nil)
+				openReportLink.OnTapped = func() {
+					if err := shared.OpenFile(reportPath); err != nil {
+						dialog.ShowError(err, w)
+					}
+				}
+				openFolderLink := widget.NewHyperlink("Open folder", nil)
+				openFolderLink.OnTapped = func() {
+					if err := shared.OpenFileExplorer(filepath.Dir(reportPath)); err != nil {
+						dialog.ShowError(err, w)
+					}
+				}
+				actionSuccessContent.Add(container.NewHBox(openReportLink, openFolderLink))
+			}
+			actionSuccessDialog := dialog.NewCustom(
+				"Update Complete",
+				"OK",
+				actionSuccessContent,
+				w,
+			)
+			actionSuccessDialog.SetOnClosed(func() {
+				recomputeVersionList(w)
+				checkForNewerVersion()
+				w.Content().Refresh()
+			})
+			actionSuccessDialog.Show()
+		})
+	}()
 }
 
 func showFileInUseRecovery(err error, w fyne.Window, retry func()) bool {
@@ -605,392 +727,823 @@ func showFileInUseRecovery(err error, w fyne.Window, retry func()) bool {
 	return true
 }
 
-// restoreLocalFilesFromPreviousVersion restores files in newDir/local from oldDir/local
-// according to the logic described in the prompt.
+// retrieveNewVersionDirs lists top-level local/ directories where subtrees
+// that differ from oldJar keep previously identical files updated from newJar
+// rather than pruning them against newJar.
+var retrieveNewVersionDirs = []string{"templates", "agegroups"}
+
+// customizableDistributionDirs and customizableDistributionFiles mirror the
+// resource directories and root files shipped as locally customizable in owlcms.jar.
+var customizableDistributionDirs = []string{
+	"ageFactors",
+	"agefactors",
+	"agegroups",
+	"css",
+	"flags",
+	"gamx",
+	"i18n",
+	"iwf",
+	"logos",
+	"mappings",
+	"pictures",
+	"qpoints",
+	"records",
+	"robi",
+	"sinclair",
+	"sounds",
+	"templates",
+	"timing",
+}
+
+var customizableDistributionFiles = []string{
+	"logback.xml",
+}
+
+func isCustomizableDistributionEntry(slashPath string) bool {
+	if slices.Contains(customizableDistributionFiles, slashPath) {
+		return true
+	}
+	for _, dir := range customizableDistributionDirs {
+		if strings.HasPrefix(slashPath, dir+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// extractDistributionLocalFiles extracts customizable files from versionDir/owlcms.jar
+// into versionDir/local without overwriting files that already exist on disk.
+func extractDistributionLocalFiles(versionDir string, dryRun bool) (string, error) {
+	jarPath := filepath.Join(versionDir, "owlcms.jar")
+	localDir := filepath.Join(versionDir, "local")
+	versionName := filepath.Base(versionDir)
+
+	var reportBuf strings.Builder
+	logBoth := func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		reportBuf.WriteString(msg)
+		log.Print(msg)
+	}
+
+	if dryRun {
+		logBoth("=== Starting Dry-Run Extraction from Distribution (%s — no files will be modified) ===\n", versionName)
+	} else {
+		logBoth("\n=== Extracting Customizable Files from Distribution (%s) ===\n", versionName)
+	}
+	logBoth("Target: %s\n", localDir)
+	logBoth("============================================================\n\n")
+
+	r, err := zip.OpenReader(jarPath)
+	if err != nil {
+		return reportBuf.String(), fmt.Errorf("failed to open %s: %w", jarPath, err)
+	}
+	defer r.Close()
+
+	var toExtract []*zip.File
+	var skippedExisting []string
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() || isIgnoredLocalMetadataFile(f.Name) {
+			continue
+		}
+		if !isCustomizableDistributionEntry(f.Name) {
+			continue
+		}
+		targetPath := filepath.Join(localDir, filepath.FromSlash(f.Name))
+		if _, err := os.Stat(targetPath); err == nil {
+			skippedExisting = append(skippedExisting, f.Name)
+			continue
+		} else if !os.IsNotExist(err) {
+			return reportBuf.String(), fmt.Errorf("failed to inspect %s: %w", targetPath, err)
+		}
+		toExtract = append(toExtract, f)
+	}
+
+	sort.Slice(toExtract, func(i, j int) bool { return toExtract[i].Name < toExtract[j].Name })
+	sort.Strings(skippedExisting)
+
+	if dryRun {
+		logBoth("Would extract from %s: %d files\n", versionName, len(toExtract))
+		for _, f := range toExtract {
+			logBoth("  + Would extract: %s\n", f.Name)
+		}
+	} else {
+		logBoth("Extracting from %s: %d files\n", versionName, len(toExtract))
+		for _, f := range toExtract {
+			targetPath := filepath.Join(localDir, filepath.FromSlash(f.Name))
+			if err := shared.EnsureDir0755(filepath.Dir(targetPath)); err != nil {
+				return reportBuf.String(), err
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return reportBuf.String(), err
+			}
+			outFile, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+			if err != nil {
+				rc.Close()
+				return reportBuf.String(), err
+			}
+			_, copyErr := io.Copy(outFile, rc)
+			closeErr := outFile.Close()
+			rc.Close()
+			if copyErr != nil {
+				return reportBuf.String(), copyErr
+			}
+			if closeErr != nil {
+				return reportBuf.String(), closeErr
+			}
+			logBoth("  + Extracted from %s: %s\n", versionName, f.Name)
+		}
+	}
+
+	if len(skippedExisting) > 0 {
+		logBoth("\nKept existing local files (not overwritten): %d\n", len(skippedExisting))
+		for _, f := range skippedExisting {
+			logBoth("  = Kept existing: %s\n", f)
+		}
+	}
+
+	if dryRun {
+		logBoth("\n=== Dry-Run Complete (no files were modified) ===\n")
+	} else {
+		logBoth("\n=== Extraction Complete ===\n")
+	}
+	return reportBuf.String(), nil
+}
+
+// restoreLocalFilesFromPreviousVersion migrates user customizations from oldDir/local
+// to newDir/local in two steps:
+//  1. Compare oldDir/local against oldDir/owlcms.jar and write additions/modifications
+//     into newDir/local (plus newJar versions of previously identical files inside
+//     differing subtrees of retrieveNewVersionDirs).
+//  2. Clean up standard paths in newDir/local that already match newDir/owlcms.jar.
 func restoreLocalFilesFromPreviousVersion(newDir, oldDir string) error {
+	_, err := migrateLocalFiles(newDir, oldDir, false)
+	return err
+}
+
+// restoreLocalFilesFromPreviousVersionWithReport migrates local/ and writes a timestamped
+// report file under newDir/logs/.
+func restoreLocalFilesFromPreviousVersionWithReport(newDir, oldDir string) (string, error) {
+	report, err := migrateLocalFiles(newDir, oldDir, false)
+	if err != nil {
+		return "", err
+	}
+	reportPath, writeErr := writeMigrationReport(
+		filepath.Join(newDir, "logs"),
+		"migration",
+		filepath.Base(oldDir),
+		filepath.Base(newDir),
+		report,
+	)
+	if writeErr != nil {
+		log.Printf("Warning: failed to write migration report: %v", writeErr)
+		return "", nil
+	}
+	return reportPath, nil
+}
+
+func defaultDownloadsDir(fallbackDir string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		downloads := filepath.Join(home, "Downloads")
+		if info, statErr := os.Stat(downloads); statErr == nil && info.IsDir() {
+			return downloads
+		}
+		return home
+	}
+	return fallbackDir
+}
+
+func sanitizeFilenamePart(s string) string {
+	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_", " ", "_")
+	return replacer.Replace(strings.TrimSpace(s))
+}
+
+func writeMigrationReport(dir, prefix, fromVersion, toVersion, content string) (string, error) {
+	if err := shared.EnsureDir0755(dir); err != nil {
+		return "", fmt.Errorf("failed to create report directory: %w", err)
+	}
+	stamp := time.Now().Format("2006-01-02_150405")
+	fileName := fmt.Sprintf("%s-%s-to-%s-%s.txt",
+		prefix,
+		sanitizeFilenamePart(fromVersion),
+		sanitizeFilenamePart(toVersion),
+		stamp,
+	)
+	reportPath := filepath.Join(dir, fileName)
+	if err := os.WriteFile(reportPath, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("failed to write report file %s: %w", reportPath, err)
+	}
+	return reportPath, nil
+}
+
+func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 	newLocal := filepath.Join(newDir, "local")
 	oldLocal := filepath.Join(oldDir, "local")
 	oldJar := filepath.Join(oldDir, "owlcms.jar")
+	newJar := filepath.Join(newDir, "owlcms.jar")
 
-	// Helper function for logging (uses standard log which goes to both console and control-panel.log)
+	var reportBuf strings.Builder
 	logBoth := func(format string, args ...any) {
-		log.Printf(format, args...)
+		msg := fmt.Sprintf(format, args...)
+		reportBuf.WriteString(msg)
+		log.Print(msg)
 	}
 
-	logBoth("\n=== Starting Import Process ===\n")
+	if dryRun {
+		logBoth("=== Starting Dry-Run Migration Report (no files will be modified) ===\n")
+	} else {
+		logBoth("\n=== Starting Import Process ===\n")
+	}
 	logBoth("From: %s\n", oldDir)
 	logBoth("To: %s\n", newDir)
 	logBoth("============================\n\n")
 
-	// Phase 1: Analyze changes made in old version
-	logBoth("Phase 1: Analyzing changes in old version...\n")
+	// Start with a clean destination local/ directory (missing newLocal is normal).
+	if !dryRun {
+		if _, err := os.Stat(newLocal); err == nil {
+			logBoth("  - Removing existing local directory: %s\n", newLocal)
+			if err := os.RemoveAll(newLocal); err != nil {
+				return reportBuf.String(), fmt.Errorf("failed to remove existing local directory: %w", err)
+			}
+		} else if !os.IsNotExist(err) {
+			return reportBuf.String(), fmt.Errorf("failed to inspect target local directory: %w", err)
+		}
+	}
 
-	// 1. Get top-level directories in newDir/local
-	logBoth("  - Getting top-level directories from new version...\n")
-	topLevelDirs, err := getTopLevelDirs(newLocal)
+	// If the previous version has no local/ directory, there is nothing to migrate.
+	oldLocalInfo, err := os.Stat(oldLocal)
+	if os.IsNotExist(err) {
+		logBoth("  - Source version has no local/ directory; nothing to migrate.\n")
+		logBoth("\n=== Import Complete ===\n")
+		return reportBuf.String(), nil
+	}
 	if err != nil {
-		return fmt.Errorf("failed to get top-level dirs: %w", err)
+		return reportBuf.String(), fmt.Errorf("failed to inspect old local directory: %w", err)
+	}
+	if !oldLocalInfo.IsDir() {
+		return reportBuf.String(), fmt.Errorf("old local path is not a directory: %s", oldLocal)
 	}
 
-	// 2. Build oldJarFiles: map[path]checksum for files in topLevelDirs inside oldJar
-	logBoth("  - Reading files from old JAR (reference state)...\n")
-	oldJarFiles, err := getJarFilesChecksums(oldJar, topLevelDirs)
+	// Step 1: Analyze oldDir/local against oldDir/owlcms.jar.
+	logBoth("Phase 1: Analyzing oldDir/local against oldDir/owlcms.jar...\n")
+	oldLocalFiles, err := collectLocalFiles(oldLocal)
 	if err != nil {
-		return fmt.Errorf("failed to get jar files: %w", err)
+		return reportBuf.String(), fmt.Errorf("failed to read old local files: %w", err)
+	}
+	if len(oldLocalFiles) == 0 {
+		logBoth("  - Source local/ directory contains no files; nothing to migrate.\n")
+		logBoth("\n=== Import Complete ===\n")
+		return reportBuf.String(), nil
 	}
 
-	// 3. Create map of files in oldDir/local
-	logBoth("  - Reading files from old local directory...\n")
-	oldLocalFiles, err := getLocalFiles(oldLocal, topLevelDirs)
-	if err != nil {
-		return fmt.Errorf("failed to get local files: %w", err)
-	}
-
-	// Track changes made in the old local directory relative to the old owlcms.jar (reference)
-	var filesDeletedFromOldJar []string   // Files/dirs in old owlcms.jar but deleted from old local
-	var filesAddedToOldLocal []string     // Files/dirs added to old local (not in old owlcms.jar)
-	var filesModifiedInOldLocal []string  // Files modified in old local vs old owlcms.jar
-	var filesUnchangedInOldLocal []string // Files unchanged in old local (same as old owlcms.jar)
-
-	// Build sorted lists of file paths for parallel traversal
-	oldJarFilesList := make([]string, 0, len(oldJarFiles))
-	for relPath := range oldJarFiles {
-		oldJarFilesList = append(oldJarFilesList, relPath)
-	}
-	sort.Strings(oldJarFilesList)
-
-	oldLocalFilesList := make([]string, 0, len(oldLocalFiles))
+	wantedOldJarFiles := make(map[string]struct{}, len(oldLocalFiles))
 	for relPath := range oldLocalFiles {
-		oldLocalFilesList = append(oldLocalFilesList, relPath)
+		wantedOldJarFiles[relPath] = struct{}{}
 	}
-	sort.Strings(oldLocalFilesList)
+	wantedOldJarPrefixes := make([]string, 0, len(retrieveNewVersionDirs))
+	for _, dir := range retrieveNewVersionDirs {
+		wantedOldJarPrefixes = append(wantedOldJarPrefixes, dir+"/")
+	}
 
-	// Parallel traversal to detect added/deleted directories early
-	logBoth("  - Performing parallel traversal to identify changes...\n")
-	jarIdx := 0
-	localIdx := 0
-	processedJarFiles := make(map[string]bool)
-	processedLocalFiles := make(map[string]bool)
-	oldLocalFilesWithChecksums := make(map[string]string) // Cache checksums as we compute them
+	oldJarFiles, err := readJarEntryChecksums(oldJar, wantedOldJarFiles, wantedOldJarPrefixes)
+	if err != nil {
+		return reportBuf.String(), fmt.Errorf("failed to read old jar files: %w", err)
+	}
 
-	for jarIdx < len(oldJarFilesList) || localIdx < len(oldLocalFilesList) {
-		var jarPath, localPath string
-		if jarIdx < len(oldJarFilesList) {
-			jarPath = oldJarFilesList[jarIdx]
+	var standardAdded []string
+	var standardModified []string
+	var standardUnchanged []string
+
+	oldLocalPaths := make([]string, 0, len(oldLocalFiles))
+	for relPath := range oldLocalFiles {
+		oldLocalPaths = append(oldLocalPaths, relPath)
+	}
+	sort.Strings(oldLocalPaths)
+
+	for _, relPath := range oldLocalPaths {
+		if isRetrieveNewVersionPath(relPath) {
+			continue
 		}
-		if localIdx < len(oldLocalFilesList) {
-			localPath = oldLocalFilesList[localIdx]
-		}
-
-		if jarIdx >= len(oldJarFilesList) {
-			// Only local files remain - these are additions
-			// Check if this is part of a new directory
-			if dir := filepath.Dir(localPath); dir != "." {
-				// Check if entire directory is new
-				if isCompleteDirectoryNew(localPath, oldLocalFilesList[localIdx:], oldJarFiles) {
-					filesAddedToOldLocal = append(filesAddedToOldLocal, dir+string(filepath.Separator))
-					// Skip all files in this directory (no need to compute checksums)
-					for localIdx < len(oldLocalFilesList) && strings.HasPrefix(oldLocalFilesList[localIdx], dir+string(filepath.Separator)) {
-						processedLocalFiles[oldLocalFilesList[localIdx]] = true
-						localIdx++
-					}
-					continue
-				}
-			}
-			processedLocalFiles[localPath] = true
-			filesAddedToOldLocal = append(filesAddedToOldLocal, localPath)
-			localIdx++
-		} else if localIdx >= len(oldLocalFilesList) {
-			// Only jar files remain - these are deletions
-			if dir := filepath.Dir(jarPath); dir != "." {
-				// Check if entire directory was deleted
-				if isCompleteDirectoryDeleted(jarPath, oldJarFilesList[jarIdx:], oldLocalFiles) {
-					filesDeletedFromOldJar = append(filesDeletedFromOldJar, dir+string(filepath.Separator))
-					// Skip all files in this directory
-					for jarIdx < len(oldJarFilesList) && strings.HasPrefix(oldJarFilesList[jarIdx], dir+string(filepath.Separator)) {
-						processedJarFiles[oldJarFilesList[jarIdx]] = true
-						jarIdx++
-					}
-					continue
-				}
-			}
-			processedJarFiles[jarPath] = true
-			filesDeletedFromOldJar = append(filesDeletedFromOldJar, jarPath)
-			jarIdx++
+		oldJarSum, inOldJar := oldJarFiles[relPath]
+		if !inOldJar {
+			standardAdded = append(standardAdded, relPath)
+		} else if oldLocalFiles[relPath] != oldJarSum {
+			standardModified = append(standardModified, relPath)
 		} else {
-			// Both lists have files, compare them
-			cmp := strings.Compare(jarPath, localPath)
-			if cmp == 0 {
-				// Directory markers are included for whole-directory change detection,
-				// but they must not be passed to the file checksum routine.
-				if isDirectoryEntry(localPath) {
-					processedJarFiles[jarPath] = true
-					processedLocalFiles[localPath] = true
-					jarIdx++
-					localIdx++
-					continue
-				}
-
-				// Same file in both - compute checksum and check if modified
-				oldFilePath := filepath.Join(oldLocal, localPath)
-				oldLocalChecksum, err := fileChecksum(oldFilePath)
-				if err != nil {
-					logBoth("Warning: failed to compute checksum for %s: %v\n", localPath, err)
-				} else {
-					oldLocalFilesWithChecksums[localPath] = oldLocalChecksum // Cache the checksum
-					if oldLocalChecksum != oldJarFiles[jarPath] {
-						filesModifiedInOldLocal = append(filesModifiedInOldLocal, localPath)
-					} else {
-						filesUnchangedInOldLocal = append(filesUnchangedInOldLocal, localPath)
-					}
-				}
-				processedJarFiles[jarPath] = true
-				processedLocalFiles[localPath] = true
-				jarIdx++
-				localIdx++
-			} else if cmp < 0 {
-				// jarPath comes before localPath - it's deleted
-				if dir := filepath.Dir(jarPath); dir != "." {
-					if isCompleteDirectoryDeleted(jarPath, oldJarFilesList[jarIdx:], oldLocalFiles) {
-						filesDeletedFromOldJar = append(filesDeletedFromOldJar, dir+string(filepath.Separator))
-						for jarIdx < len(oldJarFilesList) && strings.HasPrefix(oldJarFilesList[jarIdx], dir+string(filepath.Separator)) {
-							processedJarFiles[oldJarFilesList[jarIdx]] = true
-							jarIdx++
-						}
-						continue
-					}
-				}
-				processedJarFiles[jarPath] = true
-				filesDeletedFromOldJar = append(filesDeletedFromOldJar, jarPath)
-				jarIdx++
-			} else {
-				// localPath comes before jarPath - it's added
-				if dir := filepath.Dir(localPath); dir != "." {
-					if isCompleteDirectoryNew(localPath, oldLocalFilesList[localIdx:], oldJarFiles) {
-						filesAddedToOldLocal = append(filesAddedToOldLocal, dir+string(filepath.Separator))
-						for localIdx < len(oldLocalFilesList) && strings.HasPrefix(oldLocalFilesList[localIdx], dir+string(filepath.Separator)) {
-							processedLocalFiles[oldLocalFilesList[localIdx]] = true
-							localIdx++
-						}
-						continue
-					}
-				}
-				processedLocalFiles[localPath] = true
-				filesAddedToOldLocal = append(filesAddedToOldLocal, localPath)
-				localIdx++
-			}
+			standardUnchanged = append(standardUnchanged, relPath)
 		}
 	}
 
-	// Log comprehensive summary of changes relative to old owlcms.jar
-	logBoth("\n=== Import Analysis: User Changes Relative to Old owlcms.jar ===\n")
-	logBoth("Old owlcms.jar (reference): %s\n", oldJar)
-	logBoth("Old local directory: %s\n", oldLocal)
-	logBoth("\nFiles in old owlcms.jar: %d\n", len(oldJarFiles))
-	logBoth("Files in old local directory: %d\n", len(oldLocalFiles))
-	logBoth("\nFiles DELETED from old owlcms.jar (in old jar but not in old local): %d\n", len(filesDeletedFromOldJar))
-	if len(filesDeletedFromOldJar) > 0 {
-		sort.Strings(filesDeletedFromOldJar)
-		for _, f := range filesDeletedFromOldJar {
-			logBoth("  - DELETED in old local: %s\n", f)
+	var retrieveReport retrieveClassification
+
+	anyRetrieveDirPresent := false
+	for _, dir := range retrieveNewVersionDirs {
+		if hasSubtreeFiles(oldLocalFiles, dir) {
+			anyRetrieveDirPresent = true
+			break
 		}
 	}
-	logBoth("\nFiles ADDED to old local (in old local but not in old jar): %d\n", len(filesAddedToOldLocal))
-	if len(filesAddedToOldLocal) > 0 {
-		sort.Strings(filesAddedToOldLocal)
-		for _, f := range filesAddedToOldLocal {
-			logBoth("  + ADDED to old local: %s\n", f)
+
+	if anyRetrieveDirPresent {
+		newJarRetrievePaths, err := listJarPaths(newJar, wantedOldJarPrefixes)
+		if err != nil {
+			return reportBuf.String(), fmt.Errorf("failed to list new jar paths: %w", err)
+		}
+		newJarPathSet := make(map[string]struct{}, len(newJarRetrievePaths))
+		for _, p := range newJarRetrievePaths {
+			newJarPathSet[p] = struct{}{}
+		}
+		for _, dir := range retrieveNewVersionDirs {
+			classifyRetrieveNewVersionSubtree(
+				dir,
+				oldLocalFiles,
+				oldJarFiles,
+				newJarRetrievePaths,
+				newJarPathSet,
+				&retrieveReport,
+			)
 		}
 	}
-	logBoth("\nFiles MODIFIED in old local (checksum differs from old jar): %d\n", len(filesModifiedInOldLocal))
-	if len(filesModifiedInOldLocal) > 0 {
-		sort.Strings(filesModifiedInOldLocal)
-		for _, f := range filesModifiedInOldLocal {
-			logBoth("  * MODIFIED in old local: %s\n", f)
+	sort.Strings(retrieveReport.UntouchedDirs)
+	sort.Strings(retrieveReport.NewJarDirs)
+	sort.Strings(retrieveReport.CopyFromOld)
+	sort.Strings(retrieveReport.ExtractFromNewJar)
+	sort.Strings(retrieveReport.CopyLegacyFromOld)
+
+	oldVersion := filepath.Base(oldDir)
+	newVersion := filepath.Base(newDir)
+
+	logBoth("\n=== Import Analysis: %s -> %s ===\n", oldVersion, newVersion)
+	logBoth("Standard paths (outside %s): copied=%d modified=%d unchanged=%d\n",
+		strings.Join(retrieveNewVersionDirs, ", "), len(standardAdded), len(standardModified), len(standardUnchanged))
+	for _, f := range standardAdded {
+		logBoth("  + Copied from %s: %s\n", oldVersion, f)
+	}
+	for _, f := range standardModified {
+		logBoth("  * Modified (copied from %s): %s\n", oldVersion, f)
+	}
+
+	logBoth("\nLocal-only paths (%s):\n", strings.Join(retrieveNewVersionDirs, ", "))
+	logBoth("  Untouched folders (extracted from %s): %d\n", newVersion, len(retrieveReport.UntouchedDirs))
+	for _, d := range retrieveReport.UntouchedDirs {
+		logBoth("    = %s\n", d)
+	}
+	if len(retrieveReport.NewJarDirs) > 0 {
+		logBoth("  Brand-new folders in %s (extracted from %s): %d\n", newVersion, newVersion, len(retrieveReport.NewJarDirs))
+		for _, d := range retrieveReport.NewJarDirs {
+			logBoth("    + %s\n", d)
 		}
 	}
-	logBoth("\nFiles UNCHANGED in old local (same checksum as old jar): %d\n", len(filesUnchangedInOldLocal))
+	logBoth("  Touched folders: %d\n", len(retrieveReport.TouchedFolders))
+	for _, tf := range retrieveReport.TouchedFolders {
+		logBoth("    * %s/ (copied=%d modified=%d from-%s=%d legacy=%d new-in-%s=%d)\n",
+			tf.Dir,
+			len(tf.Added),
+			len(tf.Modified),
+			newVersion,
+			len(tf.UpdatedFromNewJar),
+			len(tf.LegacyFromOld),
+			newVersion,
+			len(tf.NewInNewJar),
+		)
+		for _, f := range tf.Added {
+			logBoth("        + Copied from %s: %s\n", oldVersion, f)
+		}
+		for _, f := range tf.Modified {
+			logBoth("        * Modified (copied from %s): %s\n", oldVersion, f)
+		}
+		for _, f := range tf.UpdatedFromNewJar {
+			logBoth("        ~ Extracted from %s: %s\n", newVersion, f)
+		}
+		for _, f := range tf.LegacyFromOld {
+			logBoth("        + Legacy (copied from %s; not in %s): %s\n", oldVersion, newVersion, f)
+		}
+		for _, f := range tf.NewInNewJar {
+			logBoth("        ! New in %s (not copied): %s\n", newVersion, f)
+		}
+	}
 	logBoth("=== End Import Analysis ===\n\n")
 
-	// Now apply the changes to the new version:
-	logBoth("\nPhase 2: Extracting fresh reference from new JAR...\n")
-
-	// Step 1: Remove existing local directory to start fresh
-	if _, err := os.Stat(newLocal); err == nil {
-		logBoth("  - Removing existing local directory: %s\n", newLocal)
-		if err := os.RemoveAll(newLocal); err != nil {
-			return fmt.Errorf("failed to remove existing local directory: %w", err)
-		}
-	} else {
-		logBoth("  - No existing local directory to remove\n")
-	}
-
-	// Step 2: Extract fresh local directory from new JAR to get the new reference state
-	logBoth("  - Extracting local/ directory from new JAR...\n")
-	newJar := filepath.Join(newDir, "owlcms.jar")
-	err = extractLocalFromJar(newJar, newLocal, topLevelDirs)
-	if err != nil {
-		return fmt.Errorf("failed to extract local from new jar: %w", err)
-	}
-
-	// Step 2: Delete files/directories that were deleted in old version
-	logBoth("\nPhase 3: Applying deletions (%d items)...\n", len(filesDeletedFromOldJar))
-	if len(filesDeletedFromOldJar) > 0 {
-		// Log what we're actually deleting, filtering out files that are under already-deleted directories
-		deletedDirs := make(map[string]bool)
-		for _, deleted := range filesDeletedFromOldJar {
-			if strings.HasSuffix(deleted, string(filepath.Separator)) {
-				deletedDirs[deleted] = true
+	if dryRun {
+		standardCandidates := make([]string, 0, len(standardAdded)+len(standardModified))
+		standardCandidates = append(standardCandidates, standardAdded...)
+		standardCandidates = append(standardCandidates, standardModified...)
+		sort.Strings(standardCandidates)
+		if len(standardCandidates) > 0 {
+			wantedInNewJar := make(map[string]struct{}, len(standardCandidates))
+			for _, f := range standardCandidates {
+				wantedInNewJar[f] = struct{}{}
 			}
-		}
-
-		for _, deleted := range filesDeletedFromOldJar {
-			// Skip logging files that are under an already-deleted directory
-			isUnderDeletedDir := false
-			for dir := range deletedDirs {
-				if deleted != dir && strings.HasPrefix(deleted, dir) {
-					isUnderDeletedDir = true
-					break
+			newJarStandard, err := readJarEntryChecksums(newJar, wantedInNewJar, nil)
+			if err != nil {
+				return reportBuf.String(), fmt.Errorf("failed to compare standard files against new jar: %w", err)
+			}
+			logBoth("Phase 3 (dry-run): Standard files matching newDir/owlcms.jar (would be pruned):\n")
+			prunedCount := 0
+			for _, f := range standardCandidates {
+				if newJarSum, ok := newJarStandard[f]; ok && oldLocalFiles[f] == newJarSum {
+					logBoth("  - Would prune (matches new jar): %s\n", f)
+					prunedCount++
 				}
 			}
-			if !isUnderDeletedDir {
-				logBoth("  - Deleting: %s\n", deleted)
+			if prunedCount == 0 {
+				logBoth("  (none)\n")
 			}
 		}
+		logBoth("\n=== Dry-Run Complete (no files were modified) ===\n")
+		return reportBuf.String(), nil
 	}
-	// Track directories that may need cleanup after file deletions
-	dirsToCheck := make(map[string]bool)
 
-	for _, deleted := range filesDeletedFromOldJar {
-		targetPath := filepath.Join(newLocal, deleted)
-		if strings.HasSuffix(deleted, string(filepath.Separator)) {
-			// It's a directory - remove entire directory
-			if err := os.RemoveAll(targetPath); err != nil && !os.IsNotExist(err) {
-				logBoth("Warning: failed to remove directory %s: %v\n", deleted, err)
-			}
-		} else {
-			// It's a file - track its parent directory for potential cleanup
-			parentDir := filepath.Dir(deleted)
-			if parentDir != "." {
-				dirsToCheck[parentDir] = true
-			}
-			if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
-				logBoth("Warning: failed to remove file %s: %v\n", deleted, err)
-			}
+	// Copy additions, modifications, and legacy files from oldDir/local -> newDir/local.
+	logBoth("Phase 2: Copying additions and modifications to newDir/local...\n")
+	toCopy := make([]string, 0, len(standardAdded)+len(standardModified)+len(retrieveReport.CopyFromOld)+len(retrieveReport.CopyLegacyFromOld))
+	toCopy = append(toCopy, standardAdded...)
+	toCopy = append(toCopy, standardModified...)
+	toCopy = append(toCopy, retrieveReport.CopyFromOld...)
+	toCopy = append(toCopy, retrieveReport.CopyLegacyFromOld...)
+	for _, relPath := range toCopy {
+		srcPath := filepath.Join(oldLocal, filepath.FromSlash(relPath))
+		dstPath := filepath.Join(newLocal, filepath.FromSlash(relPath))
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return reportBuf.String(), fmt.Errorf("failed to copy %s: %w", relPath, err)
 		}
 	}
 
-	// Clean up any directories that became empty after file deletions
-	if len(dirsToCheck) > 0 {
-		logBoth("\nCleaning up empty directories...\n")
-		for dir := range dirsToCheck {
-			dirPath := filepath.Join(newLocal, dir)
-			if err := removeEmptyDirs(dirPath, newLocal, logBoth); err != nil {
-				logBoth("Warning: failed to clean up directory %s: %v\n", dir, err)
+	// Pull updated versions from newJar for untouched directories, brand-new kit subtrees,
+	// and previously identical files in touched directories.
+	if len(retrieveReport.ExtractFromNewJar) > 0 || len(retrieveReport.NewJarDirs) > 0 {
+		logBoth("Phase 2b: Extracting updated versions from newDir/owlcms.jar (%d files, %d new dirs)...\n",
+			len(retrieveReport.ExtractFromNewJar), len(retrieveReport.NewJarDirs))
+		wantedFromNewJar := make(map[string]struct{}, len(retrieveReport.ExtractFromNewJar))
+		for _, relPath := range retrieveReport.ExtractFromNewJar {
+			wantedFromNewJar[relPath] = struct{}{}
+		}
+		extracted, missing, err := extractJarFiles(newJar, newLocal, wantedFromNewJar, retrieveReport.NewJarDirs)
+		if err != nil {
+			return reportBuf.String(), fmt.Errorf("failed to extract updated files from new jar: %w", err)
+		}
+		for _, f := range extracted {
+			logBoth("  ~ Extracted from new jar: %s\n", f)
+		}
+		for _, f := range missing {
+			srcPath := filepath.Join(oldLocal, filepath.FromSlash(f))
+			dstPath := filepath.Join(newLocal, filepath.FromSlash(f))
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return reportBuf.String(), fmt.Errorf("failed to copy legacy file %s: %w", f, err)
 			}
+			logBoth("  + Copied legacy file (removed from new jar): %s\n", f)
 		}
 	}
 
-	// Step 3: Copy modified files from old version (overwriting new version)
-	logBoth("\nPhase 4: Applying modifications (%d files)...\n", len(filesModifiedInOldLocal))
-	if len(filesModifiedInOldLocal) > 0 {
-		for _, modified := range filesModifiedInOldLocal {
-			logBoth("  - Updating: %s\n", modified)
-		}
-	}
-	for _, modified := range filesModifiedInOldLocal {
-		oldFilePath := filepath.Join(oldLocal, modified)
-		newFilePath := filepath.Join(newLocal, modified)
-		if err := copyFile(oldFilePath, newFilePath); err != nil {
-			return fmt.Errorf("failed to copy modified file %s: %w", modified, err)
-		}
-	}
-
-	// Step 4: Copy added files/directories from old version
-	logBoth("\nPhase 5: Applying additions (%d items)...\n", len(filesAddedToOldLocal))
-	if len(filesAddedToOldLocal) > 0 {
-		// Log what we're actually adding, filtering out files that are under already-added directories
-		addedDirs := make(map[string]bool)
-		for _, added := range filesAddedToOldLocal {
-			if strings.HasSuffix(added, string(filepath.Separator)) {
-				addedDirs[added] = true
-			}
-		}
-
-		for _, added := range filesAddedToOldLocal {
-			// Skip logging files that are under an already-added directory
-			isUnderAddedDir := false
-			for dir := range addedDirs {
-				if added != dir && strings.HasPrefix(added, dir) {
-					isUnderAddedDir = true
-					break
-				}
-			}
-			if !isUnderAddedDir {
-				logBoth("  + Adding: %s\n", added)
-			}
-		}
-	}
-	for _, added := range filesAddedToOldLocal {
-		oldPath := filepath.Join(oldLocal, added)
-		newPath := filepath.Join(newLocal, added)
-
-		if strings.HasSuffix(added, string(filepath.Separator)) {
-			// It's a directory - copy entire directory recursively
-			oldDirPath := strings.TrimSuffix(oldPath, string(filepath.Separator))
-			newDirPath := strings.TrimSuffix(newPath, string(filepath.Separator))
-			if err := copyDirectoryRecursive(oldDirPath, newDirPath); err != nil {
-				return fmt.Errorf("failed to copy added directory %s: %w", added, err)
-			}
-		} else {
-			// It's a file
-			if err := copyFile(oldPath, newPath); err != nil {
-				return fmt.Errorf("failed to copy added file %s: %w", added, err)
-			}
-		}
+	// Step 2: Clean up standard paths in newDir/local that already match newDir/owlcms.jar.
+	logBoth("Phase 3: Cleaning up newDir/local files matching newDir/owlcms.jar...\n")
+	if err := pruneStandardLocalMatchingJar(newLocal, newJar, logBoth); err != nil {
+		return reportBuf.String(), fmt.Errorf("failed to clean up new local against new jar: %w", err)
 	}
 
 	logBoth("\n=== Import Complete ===\n")
-	logBoth("Successfully applied all changes from %s to %s\n", oldDir, newDir)
+	logBoth("Successfully migrated customizations from %s to %s\n", oldDir, newDir)
 	logBoth("=======================\n")
+	return reportBuf.String(), nil
+}
+
+type touchedFolderReport struct {
+	Dir               string
+	Added             []string
+	Modified          []string
+	UpdatedFromNewJar []string
+	LegacyFromOld     []string
+	NewInNewJar       []string
+}
+
+type retrieveClassification struct {
+	UntouchedDirs     []string
+	NewJarDirs        []string
+	TouchedFolders    []touchedFolderReport
+	CopyFromOld       []string
+	ExtractFromNewJar []string
+	CopyLegacyFromOld []string
+}
+
+// classifyRetrieveNewVersionSubtree recursively classifies each directory under
+// retrieveNewVersionDirs present in oldLocal. Whether a folder is touched is determined
+// solely by its direct files on disk versus oldJar (absent subfolders do not mark a
+// parent folder as touched):
+//   - Untouched direct files (localDirect == jarDirect): extract all direct files of dir
+//     from newJar (updates and new additions), keeping the folder untouched for future updates.
+//   - Touched direct files (localDirect != jarDirect): copy added/modified direct files from
+//     oldLocal, extract previously identical direct files from newJar (or copy from oldLocal
+//     as legacy if absent from newJar), and leave absent files / newJar additions out.
+//   - Child subdirectories present in oldLocal are always recursed into; child subdirectories
+//     absent from oldLocal are never extracted unless they are brand-new in newJar inside a
+//     folder with untouched files or untouched sibling folders.
+func classifyRetrieveNewVersionSubtree(
+	dir string,
+	oldLocalFiles map[string]string,
+	oldJarFiles map[string]string,
+	newJarPaths []string,
+	newJarPathSet map[string]struct{},
+	report *retrieveClassification,
+) bool {
+	prefix := dir + "/"
+	localSub := subtreeMap(oldLocalFiles, dir)
+	if len(localSub) == 0 {
+		return false
+	}
+
+	jarSub := subtreeMap(oldJarFiles, dir)
+
+	localDirect := make(map[string]string)
+	localChildDirsSet := make(map[string]struct{})
+	for relPath, sum := range localSub {
+		rest := strings.TrimPrefix(relPath, prefix)
+		if child, _, hasSlash := strings.Cut(rest, "/"); hasSlash {
+			localChildDirsSet[child] = struct{}{}
+		} else {
+			localDirect[relPath] = sum
+		}
+	}
+
+	jarDirect := make(map[string]string)
+	for relPath, sum := range jarSub {
+		rest := strings.TrimPrefix(relPath, prefix)
+		if !strings.Contains(rest, "/") {
+			jarDirect[relPath] = sum
+		}
+	}
+
+	directUntouched := mapsEqual(localDirect, jarDirect)
+	hasUntouchedDirectFiles := directUntouched && len(localDirect) > 0
+
+	if hasUntouchedDirectFiles {
+		report.UntouchedDirs = append(report.UntouchedDirs, prefix)
+		for _, p := range newJarPaths {
+			if !strings.HasPrefix(p, prefix) {
+				continue
+			}
+			rest := strings.TrimPrefix(p, prefix)
+			if !strings.Contains(rest, "/") {
+				report.ExtractFromNewJar = append(report.ExtractFromNewJar, p)
+			}
+		}
+	} else if !directUntouched {
+		directPaths := make([]string, 0, len(localDirect))
+		for relPath := range localDirect {
+			directPaths = append(directPaths, relPath)
+		}
+		sort.Strings(directPaths)
+
+		folderReport := touchedFolderReport{Dir: dir}
+		for _, relPath := range directPaths {
+			baseName := strings.TrimPrefix(relPath, prefix)
+			jarSum, inOldJar := jarDirect[relPath]
+			if !inOldJar {
+				folderReport.Added = append(folderReport.Added, baseName)
+				report.CopyFromOld = append(report.CopyFromOld, relPath)
+			} else if localDirect[relPath] != jarSum {
+				folderReport.Modified = append(folderReport.Modified, baseName)
+				report.CopyFromOld = append(report.CopyFromOld, relPath)
+			} else if _, inNewJar := newJarPathSet[relPath]; inNewJar {
+				folderReport.UpdatedFromNewJar = append(folderReport.UpdatedFromNewJar, baseName)
+				report.ExtractFromNewJar = append(report.ExtractFromNewJar, relPath)
+			} else {
+				folderReport.LegacyFromOld = append(folderReport.LegacyFromOld, baseName)
+				report.CopyLegacyFromOld = append(report.CopyLegacyFromOld, relPath)
+			}
+		}
+
+		for _, p := range newJarPaths {
+			if !strings.HasPrefix(p, prefix) {
+				continue
+			}
+			rest := strings.TrimPrefix(p, prefix)
+			if strings.Contains(rest, "/") {
+				continue
+			}
+			if _, inOldJar := jarDirect[p]; !inOldJar {
+				if _, inOldLocal := localDirect[p]; !inOldLocal {
+					folderReport.NewInNewJar = append(folderReport.NewInNewJar, rest)
+				}
+			}
+		}
+
+		sort.Strings(folderReport.NewInNewJar)
+		report.TouchedFolders = append(report.TouchedFolders, folderReport)
+	}
+
+	childDirs := make([]string, 0, len(localChildDirsSet))
+	for child := range localChildDirsSet {
+		childDirs = append(childDirs, child)
+	}
+	sort.Strings(childDirs)
+
+	hadUntouchedChild := false
+	for _, child := range childDirs {
+		childDir := dir + "/" + child
+		if classifyRetrieveNewVersionSubtree(childDir, oldLocalFiles, oldJarFiles, newJarPaths, newJarPathSet, report) {
+			hadUntouchedChild = true
+		}
+	}
+
+	// For a kit directory (which has untouched direct files or untouched sibling folders),
+	// also track brand-new subdirectories introduced in newJar that did not exist in oldJar.
+	if hasUntouchedDirectFiles || hadUntouchedChild {
+		newChildDirs := make(map[string]struct{})
+		for _, p := range newJarPaths {
+			if !strings.HasPrefix(p, prefix) {
+				continue
+			}
+			rest := strings.TrimPrefix(p, prefix)
+			if child, _, hasSlash := strings.Cut(rest, "/"); hasSlash {
+				childDir := dir + "/" + child
+				if !hasSubtreeFiles(oldJarFiles, childDir) && !hasSubtreeFiles(oldLocalFiles, childDir) {
+					newChildDirs[childDir] = struct{}{}
+				}
+			}
+		}
+		sortedNewChildren := make([]string, 0, len(newChildDirs))
+		for childDir := range newChildDirs {
+			sortedNewChildren = append(sortedNewChildren, childDir)
+		}
+		sort.Strings(sortedNewChildren)
+		for _, childDir := range sortedNewChildren {
+			report.NewJarDirs = append(report.NewJarDirs, childDir+"/")
+		}
+	}
+
+	return hasUntouchedDirectFiles || hadUntouchedChild
+}
+
+func subtreeMap(files map[string]string, dir string) map[string]string {
+	prefix := dir + "/"
+	sub := make(map[string]string)
+	for relPath, sum := range files {
+		if strings.HasPrefix(relPath, prefix) {
+			sub[relPath] = sum
+		}
+	}
+	return sub
+}
+
+func hasSubtreeFiles(files map[string]string, dir string) bool {
+	prefix := dir + "/"
+	for relPath := range files {
+		if strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// pruneStandardLocalMatchingJar removes files in localDir (outside retrieveNewVersionDirs)
+// whose SHA-256 matches the corresponding entry in jarPath, then prunes empty directories.
+func pruneStandardLocalMatchingJar(localDir, jarPath string, logBoth func(string, ...any)) error {
+	if _, err := os.Stat(localDir); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	localFiles, err := collectLocalFiles(localDir)
+	if err != nil {
+		return err
+	}
+
+	standardFiles := make(map[string]string)
+	wantedInJar := make(map[string]struct{})
+	for relPath, sum := range localFiles {
+		if isRetrieveNewVersionPath(relPath) {
+			continue
+		}
+		standardFiles[relPath] = sum
+		wantedInJar[relPath] = struct{}{}
+	}
+
+	if len(standardFiles) == 0 {
+		return removeEmptyDirsUpTo(localDir, localDir, logBoth)
+	}
+
+	newJarFiles, err := readJarEntryChecksums(jarPath, wantedInJar, nil)
+	if err != nil {
+		return err
+	}
+
+	paths := make([]string, 0, len(standardFiles))
+	for relPath := range standardFiles {
+		paths = append(paths, relPath)
+	}
+	sort.Strings(paths)
+
+	dirsToCheck := make(map[string]struct{})
+	for _, relPath := range paths {
+		newJarSum, inNewJar := newJarFiles[relPath]
+		if inNewJar && standardFiles[relPath] == newJarSum {
+			targetPath := filepath.Join(localDir, filepath.FromSlash(relPath))
+			logBoth("  - Removing (matches new jar): %s\n", relPath)
+			if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			dirsToCheck[filepath.Dir(targetPath)] = struct{}{}
+		}
+	}
+
+	dirs := make([]string, 0, len(dirsToCheck))
+	for dir := range dirsToCheck {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	for _, dir := range dirs {
+		if err := removeEmptyDirsUpTo(dir, localDir, logBoth); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// getTopLevelDirs returns the names of top-level directories in dir.
-func getTopLevelDirs(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	var dirs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirs = append(dirs, entry.Name())
+func isRetrieveNewVersionPath(slashPath string) bool {
+	for _, dir := range retrieveNewVersionDirs {
+		if slashPath == dir || strings.HasPrefix(slashPath, dir+"/") {
+			return true
 		}
 	}
-	return dirs, nil
+	return false
 }
 
-// getJarFilesChecksums returns a map of file paths (relative to local/) to their SHA256 checksums
-// for files in the given topLevelDirs inside the jar file.
-func getJarFilesChecksums(jarPath string, topLevelDirs []string) (map[string]string, error) {
+func isIgnoredLocalMetadataFile(name string) bool {
+	base := filepath.Base(name)
+	return slices.Contains([]string{".DS_Store", "Thumbs.db"}, base)
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
+// collectLocalFiles walks dir and returns a map of slash-separated relative file paths
+// to their SHA-256 checksums, skipping OS metadata files.
+func collectLocalFiles(dir string) (map[string]string, error) {
+	result := make(map[string]string)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if isIgnoredLocalMetadataFile(d.Name()) {
+			return nil
+		}
+		relPath, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		sum, err := fileChecksum(path)
+		if err != nil {
+			return err
+		}
+		result[filepath.ToSlash(relPath)] = sum
+		return nil
+	})
+	return result, err
+}
+
+// readJarEntryChecksums returns SHA-256 checksums for entries in jarPath whose path is
+// in wantedFiles or starts with one of wantedPrefixes.
+func readJarEntryChecksums(jarPath string, wantedFiles map[string]struct{}, wantedPrefixes []string) (map[string]string, error) {
 	result := make(map[string]string)
 	r, err := zip.OpenReader(jarPath)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
+
 	for _, f := range r.File {
-		// Only consider files under topLevelDirs
-		parts := strings.SplitN(f.Name, "/", 2)
-		if len(parts) < 2 {
+		if f.FileInfo().IsDir() || isIgnoredLocalMetadataFile(f.Name) {
 			continue
 		}
-		topLevel := parts[0]
-		if !containsString(topLevelDirs, topLevel) {
+		matched := false
+		if _, ok := wantedFiles[f.Name]; ok {
+			matched = true
+		} else {
+			for _, prefix := range wantedPrefixes {
+				if strings.HasPrefix(f.Name, prefix) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
 			continue
 		}
-		relPath := filepath.FromSlash(f.Name)
+
 		rc, err := f.Open()
 		if err != nil {
 			return nil, err
@@ -1000,50 +1553,100 @@ func getJarFilesChecksums(jarPath string, topLevelDirs []string) (map[string]str
 		if err != nil {
 			return nil, err
 		}
-		result[relPath] = sum
+		result[f.Name] = sum
 	}
 	return result, nil
 }
 
-// getLocalFiles returns a map of relative file paths that exist in the given directory
-func getLocalFiles(dir string, topLevelDirs []string) (map[string]struct{}, error) {
-	result := make(map[string]struct{})
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
+// listJarPaths lists non-directory entry paths in jarPath matching any prefix in prefixes.
+func listJarPaths(jarPath string, prefixes []string) ([]string, error) {
+	r, err := zip.OpenReader(jarPath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
 
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
+	var paths []string
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() || isIgnoredLocalMetadataFile(f.Name) {
+			continue
 		}
-
-		// Skip the root directory itself
-		if relPath == "." {
-			return nil
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(f.Name, prefix) {
+				paths = append(paths, f.Name)
+				break
+			}
 		}
-
-		// Only consider files/dirs under topLevelDirs
-		topLevel, _, _ := strings.Cut(relPath, string(os.PathSeparator))
-		if !containsString(topLevelDirs, topLevel) {
-			return nil
-		}
-
-		// Include both directories and files
-		if d.IsDir() {
-			// Add directories with trailing separator to match JAR format
-			result[relPath+string(os.PathSeparator)] = struct{}{}
-		} else {
-			result[relPath] = struct{}{}
-		}
-		return nil
-	})
-	return result, err
+	}
+	return paths, nil
 }
 
-// isDirectoryEntry reports whether a relative path is a directory marker.
-func isDirectoryEntry(path string) bool {
-	return strings.HasSuffix(path, string(filepath.Separator))
+// extractJarFiles extracts requested exact slash-separated file paths and prefix trees
+// from jarPath into destDir.
+func extractJarFiles(jarPath, destDir string, wantedFiles map[string]struct{}, wantedPrefixes []string) ([]string, []string, error) {
+	r, err := zip.OpenReader(jarPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer r.Close()
+
+	found := make(map[string]bool, len(wantedFiles))
+	var extracted []string
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() || isIgnoredLocalMetadataFile(f.Name) {
+			continue
+		}
+		matched := false
+		if _, ok := wantedFiles[f.Name]; ok {
+			matched = true
+		} else {
+			for _, prefix := range wantedPrefixes {
+				if strings.HasPrefix(f.Name, prefix) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		targetPath := filepath.Join(destDir, filepath.FromSlash(f.Name))
+		if err := shared.EnsureDir0755(filepath.Dir(targetPath)); err != nil {
+			return nil, nil, err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, nil, err
+		}
+		outFile, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			rc.Close()
+			return nil, nil, err
+		}
+		_, copyErr := io.Copy(outFile, rc)
+		closeErr := outFile.Close()
+		rc.Close()
+		if copyErr != nil {
+			return nil, nil, copyErr
+		}
+		if closeErr != nil {
+			return nil, nil, closeErr
+		}
+
+		found[f.Name] = true
+		extracted = append(extracted, f.Name)
+	}
+
+	sort.Strings(extracted)
+	var missing []string
+	for path := range wantedFiles {
+		if !found[path] {
+			missing = append(missing, path)
+		}
+	}
+	sort.Strings(missing)
+	return extracted, missing, nil
 }
 
 // fileChecksum returns the SHA256 checksum of a file.
@@ -1085,203 +1688,46 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// copyDirectoryRecursive copies a directory and all its contents recursively.
-func copyDirectoryRecursive(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+// removeEmptyDirsUpTo removes dirPath and its empty ancestors up to and including basePath.
+func removeEmptyDirsUpTo(dirPath, basePath string, logBoth func(string, ...any)) error {
+	cleanBase := filepath.Clean(basePath)
+	cur := filepath.Clean(dirPath)
+	for {
+		relPath, err := filepath.Rel(cleanBase, cur)
+		if err != nil || strings.HasPrefix(relPath, "..") {
+			return nil
+		}
+		info, err := os.Stat(cur)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil || !info.IsDir() {
+			return err
+		}
+		entries, err := os.ReadDir(cur)
 		if err != nil {
 			return err
 		}
-
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
+		if len(entries) > 0 {
+			return nil
+		}
+		if relPath == "." {
+			logBoth("  - Removing empty local directory: %s\n", cur)
+		} else {
+			logBoth("  - Removing empty directory: %s\n", relPath)
+		}
+		if err := os.Remove(cur); err != nil {
 			return err
 		}
-
-		dstPath := filepath.Join(dst, relPath)
-
-		if info.IsDir() {
-			return shared.EnsureDir0755(dstPath)
+		if cur == cleanBase {
+			return nil
 		}
-
-		if err := shared.EnsureDir0755(filepath.Dir(dstPath)); err != nil {
-			return err
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return nil
 		}
-
-		return copyFile(path, dstPath)
-	})
-}
-
-// extractLocalFromJar extracts files from specific top-level directories in a JAR to the local directory.
-func extractLocalFromJar(jarPath, localDir string, topLevelDirs []string) error {
-	r, err := zip.OpenReader(jarPath)
-	if err != nil {
-		return err
+		cur = parent
 	}
-	defer r.Close()
-
-	for _, f := range r.File {
-		// Only extract files under topLevelDirs
-		parts := strings.SplitN(f.Name, "/", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		topLevel := parts[0]
-		if !containsString(topLevelDirs, topLevel) {
-			continue
-		}
-
-		// Convert to local file path
-		relPath := filepath.FromSlash(f.Name)
-		targetPath := filepath.Join(localDir, relPath)
-
-		if f.FileInfo().IsDir() {
-			if err := shared.EnsureDir0755(targetPath); err != nil {
-				return err
-			}
-			continue
-		}
-
-		// Create parent directory
-		if err := shared.EnsureDir0755(filepath.Dir(targetPath)); err != nil {
-			return err
-		}
-
-		// Extract file
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-
-		outFile, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
-			rc.Close()
-			return err
-		}
-
-		_, err = io.Copy(outFile, rc)
-		outFile.Close()
-		rc.Close()
-
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// containsString returns true if s is in list.
-func containsString(list []string, s string) bool {
-	return slices.Contains(list, s)
-}
-
-// isCompleteDirectoryNew checks if the current path is the start of a complete new directory
-// by checking if all files in the directory are present in the remaining sorted list and none exist in oldJar.
-// Returns true only if the directory itself didn't exist in the JAR (truly new directory).
-func isCompleteDirectoryNew(currentPath string, remainingLocalFiles []string, oldJarFiles map[string]string) bool {
-	dir := filepath.Dir(currentPath)
-	if dir == "." {
-		return false
-	}
-
-	// Check if this is the first file in the directory
-	if filepath.Dir(currentPath) != dir {
-		return false
-	}
-
-	// First, check if ANY file from this directory existed in oldJarFiles
-	// If so, this is a replacement, not a new directory
-	for jarPath := range oldJarFiles {
-		if strings.HasPrefix(jarPath, dir+string(filepath.Separator)) {
-			// Directory existed in JAR, so this is a replacement scenario, not a new directory
-			return false
-		}
-	}
-
-	// Count files in this directory from remaining list
-	fileCount := 0
-	for _, path := range remainingLocalFiles {
-		if strings.HasPrefix(path, dir+string(filepath.Separator)) {
-			fileCount++
-		} else if strings.Compare(path, dir+string(filepath.Separator)+"\xff") > 0 {
-			// Past this directory
-			break
-		}
-	}
-
-	// Only consolidate if there are multiple files AND the directory didn't exist in JAR
-	return fileCount > 1
-}
-
-// removeEmptyDirs removes a directory and its parent directories if they are empty.
-// It stops at the basePath and won't go beyond it.
-func removeEmptyDirs(dirPath string, basePath string, logBoth func(string, ...any)) error {
-	// Ensure we don't go beyond basePath
-	relPath, err := filepath.Rel(basePath, dirPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return nil
-	}
-
-	// Check if directory exists
-	info, err := os.Stat(dirPath)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return nil
-	}
-
-	// Check if directory is empty
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return err
-	}
-
-	if len(entries) == 0 {
-		// Directory is empty, remove it
-		logBoth("  - Removing empty directory: %s\n", relPath)
-		if err := os.Remove(dirPath); err != nil {
-			return err
-		}
-
-		// Recursively check parent directory
-		parentDir := filepath.Dir(dirPath)
-		if parentDir != dirPath && parentDir != basePath {
-			return removeEmptyDirs(parentDir, basePath, logBoth)
-		}
-	}
-
-	return nil
-}
-
-// isCompleteDirectoryDeleted checks if the current path is the start of a complete deleted directory
-// by checking if all files in the directory from the jar are not present in oldLocal.
-func isCompleteDirectoryDeleted(currentPath string, remainingJarFiles []string, oldLocalFiles map[string]struct{}) bool {
-	dir := filepath.Dir(currentPath)
-	if dir == "." {
-		return false
-	}
-
-	// Count files in this directory from remaining jar list
-	fileCount := 0
-	for _, path := range remainingJarFiles {
-		if strings.HasPrefix(path, dir+string(filepath.Separator)) {
-			// Check if any file in this directory exists in oldLocalFiles
-			if _, exists := oldLocalFiles[path]; exists {
-				return false
-			}
-			fileCount++
-		} else if strings.Compare(path, dir+string(filepath.Separator)+"\xff") > 0 {
-			// Past this directory
-			break
-		}
-	}
-
-	// Only consolidate if there are multiple files
-	return fileCount > 1
 }
 
 func filterVersions(versions []string, currentVersion string) []string {

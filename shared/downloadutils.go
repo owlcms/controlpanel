@@ -146,13 +146,19 @@ func GetDownloadURL(baseURL string) string {
 // ExtractZip extracts a zip archive to the specified destination directory.
 // By default, a single top-level directory is stripped. Pass false to preserve it.
 func ExtractZip(src, dest string, stripSingleRoot ...bool) error {
+	shouldStripSingleRoot := len(stripSingleRoot) == 0 || stripSingleRoot[0]
+	return ExtractZipFiltered(src, dest, shouldStripSingleRoot, nil)
+}
+
+// ExtractZipFiltered extracts a zip archive to dest, skipping any normalized entry
+// for which skip returns true.
+func ExtractZipFiltered(src, dest string, stripSingleRoot bool, skip func(entryName string) bool) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
 		return fmt.Errorf("failed to open zip file %s: %w", src, err)
 	}
-	shouldStripSingleRoot := len(stripSingleRoot) == 0 || stripSingleRoot[0]
 	stripRoot := ""
-	if shouldStripSingleRoot {
+	if stripSingleRoot {
 		stripRoot = singleZipRoot(r.File)
 	}
 
@@ -163,6 +169,9 @@ func ExtractZip(src, dest string, stripSingleRoot ...bool) error {
 
 		entryName := stripZipRoot(f.Name, stripRoot)
 		if entryName == "" {
+			continue
+		}
+		if skip != nil && skip(entryName) {
 			continue
 		}
 		fpath := filepath.Join(dest, filepath.FromSlash(entryName))

@@ -10,13 +10,30 @@ import (
 	"controlpanel/shared"
 )
 
+// extractLocalOnInitialInstall controls whether official release installs unwrap
+// the bundled local/ directory from the downloaded release ZIP.
+const extractLocalOnInitialInstall = false
+
+func isLocalZipEntry(entryName string) bool {
+	clean := strings.TrimPrefix(filepath.ToSlash(entryName), "./")
+	return clean == "local" || clean == "local/" || strings.HasPrefix(clean, "local/")
+}
+
+func extractOfficialReleaseZip(zipPath, destDir string) error {
+	if extractLocalOnInitialInstall {
+		return shared.ExtractZip(zipPath, destDir)
+	}
+	return shared.ExtractZipFiltered(zipPath, destDir, true, isLocalZipEntry)
+}
+
 // ActionResult describes the installed version affected by a non-UI action.
 type ActionResult struct {
-	Version          string
-	Path             string
-	DatabaseCopied   bool
-	EnvCopied        bool
-	LocalFilesCopied bool
+	Version             string
+	Path                string
+	DatabaseCopied      bool
+	EnvCopied           bool
+	LocalFilesCopied    bool
+	MigrationReportPath string
 }
 
 func ensureReleaseCatalog(includePrereleases bool) ([]string, error) {
@@ -61,6 +78,10 @@ func ResolveUpdateRelease(selector, fromVersion string) (string, error) {
 
 // InstallRelease downloads and extracts a clean OWLCMS release.
 func InstallRelease(downloadVersion, installVersion string, progress shared.ProgressCallback) (ActionResult, error) {
+	return installRelease(downloadVersion, installVersion, progress, nil)
+}
+
+func installRelease(downloadVersion, installVersion string, progress shared.ProgressCallback, cancel <-chan bool) (ActionResult, error) {
 	downloadVersion = strings.TrimSpace(downloadVersion)
 	installVersion = strings.TrimSpace(installVersion)
 	if downloadVersion == "" {
@@ -91,11 +112,11 @@ func InstallRelease(downloadVersion, installVersion string, progress shared.Prog
 		return ActionResult{}, fmt.Errorf("checking install directory %s: %w", extractPath, err)
 	}
 
-	if err := shared.DownloadArchive(zipURL, zipPath, progress, nil); err != nil {
+	if err := shared.DownloadArchive(zipURL, zipPath, progress, cancel); err != nil {
 		_ = os.Remove(zipPath)
 		return ActionResult{}, fmt.Errorf("download failed: %w", err)
 	}
-	if err := shared.ExtractZip(zipPath, extractPath); err != nil {
+	if err := extractOfficialReleaseZip(zipPath, extractPath); err != nil {
 		_ = os.RemoveAll(extractPath)
 		return ActionResult{}, fmt.Errorf("extraction failed: %w", err)
 	}
@@ -111,7 +132,7 @@ func InstallRelease(downloadVersion, installVersion string, progress shared.Prog
 	return ActionResult{Version: installVersion, Path: extractPath}, nil
 }
 
-// UpdateRelease downloads targetVersion and migrates data/config from existingVersion.
+// UpdateRelease installs targetVersion and imports data/config from existingVersion.
 func UpdateRelease(existingVersion, targetVersion string, progress shared.ProgressCallback, cancel <-chan bool) (ActionResult, error) {
 	existingVersion = strings.TrimSpace(existingVersion)
 	targetVersion = strings.TrimSpace(targetVersion)
@@ -130,63 +151,16 @@ func UpdateRelease(existingVersion, targetVersion string, progress shared.Progre
 	}
 
 	targetInstallVersion := computeUpdateTargetVersion(existingVersion, targetVersion)
-	newVersionDir := filepath.Join(installDir, targetInstallVersion)
-	if _, err := os.Stat(newVersionDir); err == nil {
-		return ActionResult{}, fmt.Errorf("target install version %q already exists", targetInstallVersion)
-	} else if !os.IsNotExist(err) {
-		return ActionResult{}, fmt.Errorf("checking target install directory: %w", err)
+	installed, err := installRelease(targetVersion, targetInstallVersion, progress, cancel)
+	if err != nil {
+		return ActionResult{}, err
 	}
 
-	var urlPrefix string
-	if containsPreReleaseTag(targetVersion) {
-		urlPrefix = "https://github.com/owlcms/prereleases/releases/download"
-	} else {
-		urlPrefix = "https://github.com/owlcms/releases/releases/download"
+	result, err := ImportDataAndConfig(existingVersion, installed.Version)
+	if err != nil {
+		_ = os.RemoveAll(installed.Path)
+		return ActionResult{}, err
 	}
-	fileName := fmt.Sprintf("owlcms_%s.zip", targetVersion)
-	zipURL := fmt.Sprintf("%s/%s/%s", urlPrefix, targetVersion, fileName)
-	zipPath := filepath.Join(installDir, fileName)
-
-	if err := shared.DownloadArchive(zipURL, zipPath, progress, cancel); err != nil {
-		_ = os.Remove(zipPath)
-		return ActionResult{}, fmt.Errorf("download failed: %w", err)
-	}
-
-	success := false
-	defer func() {
-		if !success {
-			_ = os.RemoveAll(newVersionDir)
-		}
-	}()
-
-	if err := shared.ExtractZip(zipPath, newVersionDir); err != nil {
-		return ActionResult{}, fmt.Errorf("extraction failed: %w", err)
-	}
-
-	result := ActionResult{Version: targetInstallVersion, Path: newVersionDir}
-	existingDatabaseDir := filepath.Join(existingVersionDir, "database")
-	if _, statErr := os.Stat(existingDatabaseDir); !os.IsNotExist(statErr) {
-		if err := copyFiles(existingDatabaseDir, filepath.Join(newVersionDir, "database"), true); err != nil {
-			return ActionResult{}, fmt.Errorf("failed to copy database: %w", err)
-		}
-		result.DatabaseCopied = true
-	} else {
-		log.Printf("Database directory does not exist in %s", existingDatabaseDir)
-	}
-
-	srcEnv := filepath.Join(existingVersionDir, "env.properties")
-	if _, statErr := os.Stat(srcEnv); statErr == nil {
-		if err := copyFile(srcEnv, filepath.Join(newVersionDir, "env.properties")); err != nil {
-			return ActionResult{}, fmt.Errorf("failed to copy env.properties: %w", err)
-		}
-		result.EnvCopied = true
-	}
-
-	if err := restoreLocalFilesFromPreviousVersion(newVersionDir, existingVersionDir); err != nil {
-		return ActionResult{}, fmt.Errorf("failed to restore local files: %w", err)
-	}
-	result.LocalFilesCopied = true
-	success = true
 	return result, nil
 }
 
@@ -208,10 +182,14 @@ func ImportDataAndConfig(sourceVersion, destVersion string) (ActionResult, error
 	}
 
 	result := ActionResult{Version: destVersion, Path: destDir}
-	if err := copyFiles(filepath.Join(sourceDir, "database"), filepath.Join(destDir, "database"), true); err != nil {
-		log.Printf("No database files to copy from %s: %v", sourceDir, err)
-	} else {
+	sourceDatabaseDir := filepath.Join(sourceDir, "database")
+	if _, statErr := os.Stat(sourceDatabaseDir); !os.IsNotExist(statErr) {
+		if err := copyFiles(sourceDatabaseDir, filepath.Join(destDir, "database"), true); err != nil {
+			return ActionResult{}, fmt.Errorf("failed to copy database: %w", err)
+		}
 		result.DatabaseCopied = true
+	} else {
+		log.Printf("Database directory does not exist in %s", sourceDatabaseDir)
 	}
 
 	srcEnv := filepath.Join(sourceDir, "env.properties")
@@ -222,13 +200,92 @@ func ImportDataAndConfig(sourceVersion, destVersion string) (ActionResult, error
 		result.EnvCopied = true
 	}
 
-	if err := restoreLocalFilesFromPreviousVersion(destDir, sourceDir); err != nil {
+	reportPath, err := restoreLocalFilesFromPreviousVersionWithReport(destDir, sourceDir)
+	if err != nil {
 		return ActionResult{}, fmt.Errorf("failed to process local files: %w", err)
 	}
 	result.LocalFilesCopied = true
+	result.MigrationReportPath = reportPath
 	return result, nil
 }
 
+// DryRunImportLocalFiles analyzes migrating local/ from sourceVersion to destVersion
+// without modifying any files, and saves a timestamped report to the user's Downloads folder.
+func DryRunImportLocalFiles(sourceVersion, destVersion string) (string, error) {
+	sourceVersion = strings.TrimSpace(sourceVersion)
+	destVersion = strings.TrimSpace(destVersion)
+	sourceDir := filepath.Join(installDir, sourceVersion)
+	destDir := filepath.Join(installDir, destVersion)
+	if info, err := os.Stat(sourceDir); err != nil {
+		return "", fmt.Errorf("source version %q does not exist: %w", sourceVersion, err)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("source version %q is not a directory", sourceVersion)
+	}
+	if info, err := os.Stat(destDir); err != nil {
+		return "", fmt.Errorf("destination version %q does not exist: %w", destVersion, err)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("destination version %q is not a directory", destVersion)
+	}
+
+	report, err := migrateLocalFiles(destDir, sourceDir, true)
+	if err != nil {
+		return "", fmt.Errorf("failed to analyze local files: %w", err)
+	}
+	return writeMigrationReport(defaultDownloadsDir(filepath.Join(destDir, "logs")), "migration-dry-run", sourceVersion, destVersion, report)
+}
+
+// ExtractLocalFromDistribution extracts customizable distribution files from version/owlcms.jar
+// into version/local without overwriting existing files, and saves a report under version/logs/.
+func ExtractLocalFromDistribution(version string) (string, error) {
+	version = strings.TrimSpace(version)
+	versionDir := filepath.Join(installDir, version)
+	if info, err := os.Stat(versionDir); err != nil {
+		return "", fmt.Errorf("version %q does not exist: %w", version, err)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("version %q is not a directory", version)
+	}
+
+	report, err := extractDistributionLocalFiles(versionDir, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract distribution files: %w", err)
+	}
+	reportPath, writeErr := writeMigrationReport(
+		filepath.Join(versionDir, "logs"),
+		"extract",
+		version,
+		version,
+		report,
+	)
+	if writeErr != nil {
+		log.Printf("Warning: failed to write extraction report: %v", writeErr)
+		return "", nil
+	}
+	return reportPath, nil
+}
+
+// DryRunExtractLocalFromDistribution analyzes which customizable files from version/owlcms.jar
+// would be extracted into version/local without modifying any files, saving the report to Downloads.
+func DryRunExtractLocalFromDistribution(version string) (string, error) {
+	version = strings.TrimSpace(version)
+	versionDir := filepath.Join(installDir, version)
+	if info, err := os.Stat(versionDir); err != nil {
+		return "", fmt.Errorf("version %q does not exist: %w", version, err)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf("version %q is not a directory", version)
+	}
+
+	report, err := extractDistributionLocalFiles(versionDir, true)
+	if err != nil {
+		return "", fmt.Errorf("failed to analyze distribution files: %w", err)
+	}
+	return writeMigrationReport(
+		defaultDownloadsDir(filepath.Join(versionDir, "logs")),
+		"extract-dry-run",
+		version,
+		version,
+		report,
+	)
+}
 // DuplicateInstalledVersion copies an installed OWLCMS version to an exact new directory name.
 func DuplicateInstalledVersion(fromVersion, newVersion string) (ActionResult, error) {
 	created, err := shared.DuplicateVersionDirectory(installDir, fromVersion, newVersion)
