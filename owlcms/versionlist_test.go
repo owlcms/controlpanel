@@ -352,20 +352,25 @@ func TestMigrateLocalFilesDryRunDoesNotModifyDestinationAndReportsPruned(t *test
 	newDir := filepath.Join(root, "69.0.0-rc10")
 
 	writeTestJar(t, filepath.Join(oldDir, "owlcms.jar"), map[string]string{
-		"css/results.css":           "buggy",
-		"css/plates.css":            "old-plates",
-		"templates/timing/T.xlsx":   "T-v1",
-		"templates/results/A.xlsx":  "A-v1",
+		"css/results.css":          "buggy",
+		"css/plates.css":           "old-plates",
+		"css/colors.css":           "same-colors",
+		"css/removed.css":          "old-removed",
+		"templates/timing/T.xlsx":  "T-v1",
+		"templates/results/A.xlsx": "A-v1",
 	})
 	writeTestLocalFiles(t, filepath.Join(oldDir, "local"), map[string]string{
 		"css/results.css":             "fixed",
 		"css/plates.css":              "custom-plates",
+		"css/colors.css":              "custom-colors",
+		"css/removed.css":             "custom-removed",
 		"templates/timing/T.xlsx":     "T-v1",
 		"templates/results/USAW.xlsx": "usaw",
 	})
 	writeTestJar(t, filepath.Join(newDir, "owlcms.jar"), map[string]string{
-		"css/results.css":          "fixed", // integrated fix -> would be pruned
-		"css/plates.css":           "new-plates",
+		"css/results.css":          "fixed",       // integrated fix -> would be pruned
+		"css/plates.css":           "new-plates",  // distribution also changed -> please check
+		"css/colors.css":           "same-colors", // distribution unchanged -> likely OK
 		"templates/timing/T.xlsx":  "T-v2",
 		"templates/results/A.xlsx": "A-v2",
 	})
@@ -387,8 +392,10 @@ func TestMigrateLocalFilesDryRunDoesNotModifyDestinationAndReportsPruned(t *test
 
 	for _, substr := range []string{
 		"Starting Dry-Run Migration Report",
-		"Modified (copied from 68.0.8): css/plates.css",
-		"Modified (copied from 68.0.8): css/results.css",
+		"Modified (copied from 68.0.8; 69.0.0-rc10 distribution unchanged — likely OK): css/colors.css",
+		"Modified (copied from 68.0.8; 69.0.0-rc10 distribution also changed — please check): css/plates.css",
+		"Modified (copied from 68.0.8; removed from 69.0.0-rc10 distribution — please check): css/removed.css",
+		"Modified (copied from 68.0.8; matches 69.0.0-rc10 — will be pruned): css/results.css",
 		"Would prune (matches new jar): css/results.css",
 		"= templates/timing/",
 		"+ Copied from 68.0.8: USAW.xlsx",
@@ -428,7 +435,7 @@ func TestRestoreLocalWithReportWritesLogFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read report %s: %v", reportPath, err)
 	}
-	if !strings.Contains(string(data), "Modified (copied from 68.0.8): css/plates.css") {
+	if !strings.Contains(string(data), "Modified (copied from 68.0.8; 69.0.0-rc10 distribution also changed — please check): css/plates.css") {
 		t.Fatalf("expected report content to mention css/plates.css, got:\n%s", string(data))
 	}
 }

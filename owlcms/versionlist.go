@@ -997,16 +997,29 @@ func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 		return reportBuf.String(), nil
 	}
 
+	anyRetrieveDirPresent := false
+	for _, dir := range retrieveNewVersionDirs {
+		if hasSubtreeFiles(oldLocalFiles, dir) {
+			anyRetrieveDirPresent = true
+			break
+		}
+	}
+
 	wantedOldJarFiles := make(map[string]struct{}, len(oldLocalFiles))
 	for relPath := range oldLocalFiles {
 		wantedOldJarFiles[relPath] = struct{}{}
 	}
-	wantedOldJarPrefixes := make([]string, 0, len(retrieveNewVersionDirs))
-	for _, dir := range retrieveNewVersionDirs {
-		wantedOldJarPrefixes = append(wantedOldJarPrefixes, dir+"/")
+	var wantedRetrievePrefixes []string
+	if anyRetrieveDirPresent {
+		wantedRetrievePrefixes = make([]string, 0, len(retrieveNewVersionDirs))
+		for _, dir := range retrieveNewVersionDirs {
+			wantedRetrievePrefixes = append(wantedRetrievePrefixes, dir+"/")
+		}
 	}
 
-	oldJarFiles, err := readJarEntryChecksums(oldJar, wantedOldJarFiles, wantedOldJarPrefixes)
+	// Single scan of oldJar: hashes only files present in oldLocal (plus retrieve-new-version
+	// prefixes if present in oldLocal).
+	oldJarFiles, err := readJarEntryChecksums(oldJar, wantedOldJarFiles, wantedRetrievePrefixes)
 	if err != nil {
 		return reportBuf.String(), fmt.Errorf("failed to read old jar files: %w", err)
 	}
@@ -1035,21 +1048,58 @@ func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 		}
 	}
 
-	var retrieveReport retrieveClassification
+	standardCandidates := make([]string, 0, len(standardAdded)+len(standardModified))
+	standardCandidates = append(standardCandidates, standardAdded...)
+	standardCandidates = append(standardCandidates, standardModified...)
+	sort.Strings(standardCandidates)
 
-	anyRetrieveDirPresent := false
-	for _, dir := range retrieveNewVersionDirs {
-		if hasSubtreeFiles(oldLocalFiles, dir) {
-			anyRetrieveDirPresent = true
-			break
+	// Single open + scan of newJar: hashes only standardCandidates and indexes
+	// retrieve-new-version entries (without decompressing them) for classification and extraction.
+	newJarStandard := make(map[string]string)
+	var newJarRetrievePaths []string
+	newJarRetrieveEntries := make(map[string]*zip.File)
+	var newJarReader *zip.ReadCloser
+	if len(standardCandidates) > 0 || anyRetrieveDirPresent {
+		wantedInNewJar := make(map[string]struct{}, len(standardCandidates))
+		for _, f := range standardCandidates {
+			wantedInNewJar[f] = struct{}{}
+		}
+		newJarReader, err = zip.OpenReader(newJar)
+		if err != nil {
+			return reportBuf.String(), fmt.Errorf("failed to open new jar: %w", err)
+		}
+		defer newJarReader.Close()
+
+		for _, f := range newJarReader.File {
+			if f.FileInfo().IsDir() || isIgnoredLocalMetadataFile(f.Name) {
+				continue
+			}
+			if _, ok := wantedInNewJar[f.Name]; ok {
+				rc, openErr := f.Open()
+				if openErr != nil {
+					return reportBuf.String(), fmt.Errorf("failed to read %s from new jar: %w", f.Name, openErr)
+				}
+				sum, sumErr := streamChecksum(rc)
+				rc.Close()
+				if sumErr != nil {
+					return reportBuf.String(), fmt.Errorf("failed to checksum %s in new jar: %w", f.Name, sumErr)
+				}
+				newJarStandard[f.Name] = sum
+			}
+			if anyRetrieveDirPresent {
+				for _, prefix := range wantedRetrievePrefixes {
+					if strings.HasPrefix(f.Name, prefix) {
+						newJarRetrievePaths = append(newJarRetrievePaths, f.Name)
+						newJarRetrieveEntries[f.Name] = f
+						break
+					}
+				}
+			}
 		}
 	}
 
+	var retrieveReport retrieveClassification
 	if anyRetrieveDirPresent {
-		newJarRetrievePaths, err := listJarPaths(newJar, wantedOldJarPrefixes)
-		if err != nil {
-			return reportBuf.String(), fmt.Errorf("failed to list new jar paths: %w", err)
-		}
 		newJarPathSet := make(map[string]struct{}, len(newJarRetrievePaths))
 		for _, p := range newJarRetrievePaths {
 			newJarPathSet[p] = struct{}{}
@@ -1078,10 +1128,28 @@ func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 	logBoth("Standard paths (outside %s): copied=%d modified=%d unchanged=%d\n",
 		strings.Join(retrieveNewVersionDirs, ", "), len(standardAdded), len(standardModified), len(standardUnchanged))
 	for _, f := range standardAdded {
-		logBoth("  + Copied from %s: %s\n", oldVersion, f)
+		if newJarSum, inNewJar := newJarStandard[f]; inNewJar {
+			if oldLocalFiles[f] == newJarSum {
+				logBoth("  + Copied from %s (matches %s — will be pruned): %s\n", oldVersion, newVersion, f)
+			} else {
+				logBoth("  ! Copied from %s (also in %s distribution with different content — please check): %s\n", oldVersion, newVersion, f)
+			}
+		} else {
+			logBoth("  + Copied from %s: %s\n", oldVersion, f)
+		}
 	}
 	for _, f := range standardModified {
-		logBoth("  * Modified (copied from %s): %s\n", oldVersion, f)
+		newJarSum, inNewJar := newJarStandard[f]
+		switch {
+		case inNewJar && oldLocalFiles[f] == newJarSum:
+			logBoth("  * Modified (copied from %s; matches %s — will be pruned): %s\n", oldVersion, newVersion, f)
+		case inNewJar && newJarSum == oldJarFiles[f]:
+			logBoth("  * Modified (copied from %s; %s distribution unchanged — likely OK): %s\n", oldVersion, newVersion, f)
+		case inNewJar:
+			logBoth("  ! Modified (copied from %s; %s distribution also changed — please check): %s\n", oldVersion, newVersion, f)
+		default:
+			logBoth("  ! Modified (copied from %s; removed from %s distribution — please check): %s\n", oldVersion, newVersion, f)
+		}
 	}
 
 	logBoth("\nLocal-only paths (%s):\n", strings.Join(retrieveNewVersionDirs, ", "))
@@ -1126,19 +1194,7 @@ func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 	logBoth("=== End Import Analysis ===\n\n")
 
 	if dryRun {
-		standardCandidates := make([]string, 0, len(standardAdded)+len(standardModified))
-		standardCandidates = append(standardCandidates, standardAdded...)
-		standardCandidates = append(standardCandidates, standardModified...)
-		sort.Strings(standardCandidates)
 		if len(standardCandidates) > 0 {
-			wantedInNewJar := make(map[string]struct{}, len(standardCandidates))
-			for _, f := range standardCandidates {
-				wantedInNewJar[f] = struct{}{}
-			}
-			newJarStandard, err := readJarEntryChecksums(newJar, wantedInNewJar, nil)
-			if err != nil {
-				return reportBuf.String(), fmt.Errorf("failed to compare standard files against new jar: %w", err)
-			}
 			logBoth("Phase 3 (dry-run): Standard files matching newDir/owlcms.jar (would be pruned):\n")
 			prunedCount := 0
 			for _, f := range standardCandidates {
@@ -1171,7 +1227,7 @@ func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 	}
 
 	// Pull updated versions from newJar for untouched directories, brand-new kit subtrees,
-	// and previously identical files in touched directories.
+	// and previously identical files in touched directories using the already-indexed entries.
 	if len(retrieveReport.ExtractFromNewJar) > 0 || len(retrieveReport.NewJarDirs) > 0 {
 		logBoth("Phase 2b: Extracting updated versions from newDir/owlcms.jar (%d files, %d new dirs)...\n",
 			len(retrieveReport.ExtractFromNewJar), len(retrieveReport.NewJarDirs))
@@ -1179,7 +1235,7 @@ func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 		for _, relPath := range retrieveReport.ExtractFromNewJar {
 			wantedFromNewJar[relPath] = struct{}{}
 		}
-		extracted, missing, err := extractJarFiles(newJar, newLocal, wantedFromNewJar, retrieveReport.NewJarDirs)
+		extracted, missing, err := extractIndexedJarEntries(newJarRetrieveEntries, newLocal, wantedFromNewJar, retrieveReport.NewJarDirs)
 		if err != nil {
 			return reportBuf.String(), fmt.Errorf("failed to extract updated files from new jar: %w", err)
 		}
@@ -1196,9 +1252,10 @@ func migrateLocalFiles(newDir, oldDir string, dryRun bool) (string, error) {
 		}
 	}
 
-	// Step 2: Clean up standard paths in newDir/local that already match newDir/owlcms.jar.
+	// Step 2: Clean up standard paths in newDir/local that already match newDir/owlcms.jar
+	// using the checksums already collected in the single newJar scan.
 	logBoth("Phase 3: Cleaning up newDir/local files matching newDir/owlcms.jar...\n")
-	if err := pruneStandardLocalMatchingJar(newLocal, newJar, logBoth); err != nil {
+	if err := pruneStandardLocalMatchingChecksums(newLocal, standardCandidates, oldLocalFiles, newJarStandard, logBoth); err != nil {
 		return reportBuf.String(), fmt.Errorf("failed to clean up new local against new jar: %w", err)
 	}
 
@@ -1396,49 +1453,28 @@ func hasSubtreeFiles(files map[string]string, dir string) bool {
 	return false
 }
 
-// pruneStandardLocalMatchingJar removes files in localDir (outside retrieveNewVersionDirs)
-// whose SHA-256 matches the corresponding entry in jarPath, then prunes empty directories.
-func pruneStandardLocalMatchingJar(localDir, jarPath string, logBoth func(string, ...any)) error {
+// pruneStandardLocalMatchingChecksums removes standard-path files in localDir
+// whose SHA-256 matches the corresponding entry in newJarChecksums, then prunes empty directories.
+func pruneStandardLocalMatchingChecksums(
+	localDir string,
+	standardPaths []string,
+	localChecksums map[string]string,
+	newJarChecksums map[string]string,
+	logBoth func(string, ...any),
+) error {
 	if _, err := os.Stat(localDir); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
 		return err
 	}
-
-	localFiles, err := collectLocalFiles(localDir)
-	if err != nil {
-		return err
-	}
-
-	standardFiles := make(map[string]string)
-	wantedInJar := make(map[string]struct{})
-	for relPath, sum := range localFiles {
-		if isRetrieveNewVersionPath(relPath) {
-			continue
-		}
-		standardFiles[relPath] = sum
-		wantedInJar[relPath] = struct{}{}
-	}
-
-	if len(standardFiles) == 0 {
+	if len(standardPaths) == 0 {
 		return removeEmptyDirsUpTo(localDir, localDir, logBoth)
 	}
 
-	newJarFiles, err := readJarEntryChecksums(jarPath, wantedInJar, nil)
-	if err != nil {
-		return err
-	}
-
-	paths := make([]string, 0, len(standardFiles))
-	for relPath := range standardFiles {
-		paths = append(paths, relPath)
-	}
-	sort.Strings(paths)
-
 	dirsToCheck := make(map[string]struct{})
-	for _, relPath := range paths {
-		newJarSum, inNewJar := newJarFiles[relPath]
-		if inNewJar && standardFiles[relPath] == newJarSum {
+	for _, relPath := range standardPaths {
+		newJarSum, inNewJar := newJarChecksums[relPath]
+		if inNewJar && localChecksums[relPath] == newJarSum {
 			targetPath := filepath.Join(localDir, filepath.FromSlash(relPath))
 			logBoth("  - Removing (matches new jar): %s\n", relPath)
 			if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
@@ -1558,59 +1594,31 @@ func readJarEntryChecksums(jarPath string, wantedFiles map[string]struct{}, want
 	return result, nil
 }
 
-// listJarPaths lists non-directory entry paths in jarPath matching any prefix in prefixes.
-func listJarPaths(jarPath string, prefixes []string) ([]string, error) {
-	r, err := zip.OpenReader(jarPath)
-	if err != nil {
-		return nil, err
-	}
-	defer r.Close()
-
-	var paths []string
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() || isIgnoredLocalMetadataFile(f.Name) {
-			continue
-		}
-		for _, prefix := range prefixes {
-			if strings.HasPrefix(f.Name, prefix) {
-				paths = append(paths, f.Name)
-				break
-			}
-		}
-	}
-	return paths, nil
-}
-
-// extractJarFiles extracts requested exact slash-separated file paths and prefix trees
-// from jarPath into destDir.
-func extractJarFiles(jarPath, destDir string, wantedFiles map[string]struct{}, wantedPrefixes []string) ([]string, []string, error) {
-	r, err := zip.OpenReader(jarPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer r.Close()
-
+// extractIndexedJarEntries extracts requested exact slash-separated file paths and
+// prefix trees from already-indexed *zip.File entries into destDir without reopening the JAR.
+func extractIndexedJarEntries(entries map[string]*zip.File, destDir string, wantedFiles map[string]struct{}, wantedPrefixes []string) ([]string, []string, error) {
 	found := make(map[string]bool, len(wantedFiles))
-	var extracted []string
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() || isIgnoredLocalMetadataFile(f.Name) {
-			continue
-		}
+	var selected []*zip.File
+	for name, f := range entries {
 		matched := false
-		if _, ok := wantedFiles[f.Name]; ok {
+		if _, ok := wantedFiles[name]; ok {
 			matched = true
 		} else {
 			for _, prefix := range wantedPrefixes {
-				if strings.HasPrefix(f.Name, prefix) {
+				if strings.HasPrefix(name, prefix) {
 					matched = true
 					break
 				}
 			}
 		}
-		if !matched {
-			continue
+		if matched {
+			selected = append(selected, f)
 		}
+	}
+	sort.Slice(selected, func(i, j int) bool { return selected[i].Name < selected[j].Name })
 
+	var extracted []string
+	for _, f := range selected {
 		targetPath := filepath.Join(destDir, filepath.FromSlash(f.Name))
 		if err := shared.EnsureDir0755(filepath.Dir(targetPath)); err != nil {
 			return nil, nil, err
@@ -1638,7 +1646,6 @@ func extractJarFiles(jarPath, destDir string, wantedFiles map[string]struct{}, w
 		extracted = append(extracted, f.Name)
 	}
 
-	sort.Strings(extracted)
 	var missing []string
 	for path := range wantedFiles {
 		if !found[path] {
