@@ -16,6 +16,8 @@ The control panel is installed once. It will automatically download the correct 
   - css, flags, pictures, logos etc that have been added or modified are migrated
   - For templates, the process is slightly different: If a folder containing new, modified or removed templates is found, it is migrated as is
   - The same is true for age group definitions
+- Migration and dry-run reports list the copied and extracted files and indicate whether modified distribution files (such as CSS) were unchanged or also changed in the new version
+- Import dialog includes `<version> (extract from distribution)` to extract customizable files into `local/` without overwriting existing files
 
 ### 3.10.2
 
